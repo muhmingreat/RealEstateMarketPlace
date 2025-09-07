@@ -1,9 +1,10 @@
 import { io } from "socket.io-client";
 import { useState, useEffect, useMemo } from "react";
 import axios from "axios";
+import { buildApiUrl } from "../utils/api";
 
-const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ||
- "https://real-state-backend-liart.vercel.app/";
+// const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ||
+//  "https://real-state-backend-liart.vercel.app/";
 
 
 export default function useKYC(currentUserId) {
@@ -38,7 +39,7 @@ export default function useKYC(currentUserId) {
       formData.append("document", idDocumentFile);
       if (selfieFile) formData.append("selfie", selfieFile);
 
-      const res = await axios.post(`${apiBaseUrl}/kyc/upload`, formData, {
+      const res = await axios.post(`${buildApiUrl("/kyc/upload")}`, formData, {
         headers: { "Content-Type": "multipart/form-data" },
       });
 
@@ -56,7 +57,7 @@ export default function useKYC(currentUserId) {
     try {
       setLoading(true);
       setError(null);
-      const res = await axios.get(`${apiBaseUrl}/kyc/requests/${wallet}`);
+      const res = await axios.get(`${buildApiUrl("/kyc/requests")}/${wallet}`);
       setStatus(res.data);
       return res.data;
     } catch (err) {
@@ -71,7 +72,7 @@ export default function useKYC(currentUserId) {
     try {
       setLoading(true);
       setError(null);
-      const res = await axios.post(`${apiBaseUrl}/kyc/approve`, { walletAddress });
+      const res = await axios.post(`${buildApiUrl("/kyc/approve")}`, { walletAddress });
       setStatus(res.data);
       return res.data;
     } catch (err) {
@@ -86,7 +87,7 @@ export default function useKYC(currentUserId) {
     try {
       setLoading(true);
       setError(null);
-      const res = await axios.post(`${apiBaseUrl}/kyc/reject`, { walletAddress });
+      const res = await axios.post(`${buildApiUrl("/kyc/reject")}`, { walletAddress });
       setStatus(res.data);
       return res.data;
     } catch (err) {

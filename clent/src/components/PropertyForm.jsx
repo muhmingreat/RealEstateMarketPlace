@@ -2,7 +2,7 @@ import React, { useState, useRef,useEffect } from "react";
 import { motion } from "framer-motion";
 import useListProperty from "../hooks/useListProperty";
 import { useAppKitAccount } from "@reown/appkit/react";
-import { uploadToIPFS } from "../utlis";
+import { uploadToIPFS } from "../utils/uploadToIPFS";
 import { toast } from "react-toastify";
 import { ethers } from "ethers";
 import { useGetLatestEthPrice } from "../hooks/useBlockchain";
