@@ -1,0 +1,14 @@
+@import "tailwindcss";
+
+@keyframes gradient-shine {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+.bg-shining {
+  @apply min-h-screen flex items-center justify-center p-6;
+  background: linear-gradient(270deg, #0f172a, #2563eb, #dbeafe);
+  background-size: 400% 400%;
+  animation: gradient-shine 10s ease infinite;
+}
