@@ -5,7 +5,19 @@ import React, { useState, useEffect, useMemo } from "react";
 export default function ThunderSuccess({ trigger, count = 1000 }) {
   const [active, setActive] = useState(false);
 
- const colors = ["#00ffff", "#ff69b4", "#ffa500", "#7fff00", "#ff4500", "#1e90ff", "#ff1493"];
+//  const colors = ["#B22222", "#00008B", "#000000", "#FFFFFF", "#800080", "#2F4F4F"]
+
+const colors = [
+  "#B22222", // Firebrick (deep red)
+  "#8B4513", // SaddleBrown
+  "#FFD700", // Gold
+  "#000000", // Black
+  "#FFFFFF", // White
+  "#1E90FF", // DodgerBlue (sharp blue accent)
+  "#32CD32", // LimeGreen (sharp green accent)
+  "#800080"  // Purple (rich accent)
+];
+
   useEffect(() => {
     if (trigger) {
       setActive(true);

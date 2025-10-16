@@ -4,7 +4,7 @@ const initialState = {
   properties: [],
   myProperties: [],
   highestRated: null,
-  reviews: {}, 
+  reviews: {},
   userReviews: [],
   loading: false,
   error: null,
@@ -27,15 +27,21 @@ const realEstateSlice = createSlice({
     addProperty: (state, action) => {
       if (action.payload) state.properties.push(action.payload);
     },
+          setSelectedProperty: (state, action) => {
+  state.selectedProperty = action.payload || null;
+},
+
     updateProperty: (state, action) => {
       const updatedProperty = action.payload;
       if (!updatedProperty?.productID) return;
-
       const index = state.properties.findIndex(
         (p) => p.productID === updatedProperty.productID
       );
       if (index !== -1)
-        state.properties[index] = { ...state.properties[index], ...updatedProperty };
+        state.properties[index] = {
+          ...state.properties[index],
+          ...updatedProperty,
+        };
     },
     updatePrice: (state, action) => {
       const { productID, price } = action.payload || {};
@@ -71,6 +77,26 @@ const realEstateSlice = createSlice({
     setError: (state, action) => {
       state.error = action.payload || null;
     },
+
+    // 🚀 New reducer for deleting property
+    deleteProperty: (state, action) => {
+      const propertyId = action.payload;
+      if (!propertyId) return;
+
+      // Remove from `properties`
+      state.properties = state.properties.filter(
+        (p) => p.productID !== propertyId
+      );
+
+
+      // Remove from `myProperties`
+      state.myProperties = state.myProperties.filter(
+        (p) => p.productID !== propertyId
+      );
+
+      // Remove associated reviews
+      delete state.reviews[propertyId];
+    },
   },
 });
 
@@ -86,13 +112,11 @@ export const {
   likeReview,
   setUserReviews,
   setLoading,
+  setSelectedProperty,
   setError,
   setSearchQuery,
+  deleteProperty, // <- export new action
 } = realEstateSlice.actions;
 
 export default realEstateSlice.reducer;
-
-
-
-
 

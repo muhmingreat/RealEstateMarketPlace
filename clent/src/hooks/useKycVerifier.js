@@ -98,6 +98,20 @@ export default function useKYC(currentUserId) {
     }
   };
 
+const getAllApprovedUsers = async () => {
+  try {
+    setLoading(true);
+    setError(null);
+
+    const res = await axios.get(`${buildApiUrl("/kyc/approved")}`);
+    return res.data; // array of approved users
+  } catch (err) {
+    setError(err.response?.data || err.message);
+    return [];
+  } finally {
+    setLoading(false);
+  }
+};
 
 
   return {
@@ -106,7 +120,7 @@ export default function useKYC(currentUserId) {
     checkKYCStatus,
     approveKYC,
     rejectKYC,
-  
+  getAllApprovedUsers,
    
     status,
     loading,

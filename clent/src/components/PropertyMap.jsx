@@ -27,10 +27,17 @@ export default function PropertyMap({ address, title, imageUrl }) {
 
     const fetchCoords = async () => {
       try {
+        const url =
+  window.location.hostname === "localhost"
+    ? `http://localhost:5000/api/geocode?q=${encodeURIComponent(address)}`
+    : `https://real-state-backend-liart.vercel.app/api/geocode?q=${encodeURIComponent(address)}`;
 
-        const res = await fetch(
-          `http://localhost:5000/api/geocode?q=${encodeURIComponent(address)}`
-        );
+const res = await fetch(url);
+
+        // const res = await fetch(
+        //   `http://localhost:5000/api/geocode?q=${encodeURIComponent(address)}` ||
+        //   `https://real-state-backend-liart.vercel.app/api/geocode?q=${encodeURIComponent(address)}`
+        // );
         const data = await res.json();
         console.log("Fetched data:", data);
 

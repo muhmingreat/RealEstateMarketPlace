@@ -1,3 +1,7 @@
+
+
+
+
 import React, { useState } from "react";
 
 const faqs = [
@@ -36,13 +40,14 @@ export default function FAQ() {
   };
 
   return (
-    <section className="max-w-3xl mx-auto p-6  ">
-      <h2 className="text-3xl font-bold mb-8 text-center">Frequently Asked Questions</h2>
+    <div className=" bg-[#1B2A49]  ">
+    <section className="max-w-3xl mx-auto p-6 ">
+      <h2 className="text-3xl font-bold mb-8 text-gray-200 text-center">Frequently Asked Questions</h2>
       <div className="space-y-4">
         {faqs.map((faq, index) => (
           <div
             key={index}
-            className=" rounded-xl shadow-sm bg-white"
+            className=" rounded-xl shadow-sm  bg-white"
           >
             <button
               onClick={() => toggleFAQ(index)}
@@ -55,7 +60,7 @@ export default function FAQ() {
               </span>
             </button>
             {openIndex === index && (
-              <div className="px-5 pb-4 text-gray-600 animate-fadeIn">
+              <div className="px-5 pb-4  text-gray-600 animate-fadeIn">
                 {faq.answer}
               </div>
             )}
@@ -63,5 +68,6 @@ export default function FAQ() {
         ))}
       </div>
     </section>
+    </div>
   );
 }

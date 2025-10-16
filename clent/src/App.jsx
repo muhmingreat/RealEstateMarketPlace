@@ -7,7 +7,7 @@ import { Route, Routes } from 'react-router-dom'
 import Home from './pages/Home';
 import PropertyForm from './components/PropertyForm';
 import KYCForm from './components/KYCForm';
-import KycAdminPanel from './pages/AdminPanel';
+import KYCApprove from './pages/KYCApprove';
 import AllProperties from './pages/Properties';
 import PropertyDetails from './pages/PropertyDetails';
 import UpdateProperty from './components/UpdateProperty';
@@ -20,8 +20,15 @@ import FAQ from './pages/FAQ';
 import PrivacyPolicy from './pages/PolicyAndPrivacy';
 import ContactAdmin from './pages/ContactAdmin';
 import ChatPage from './pages/Chatpage';
-
+import { useAppKitAccount } from '@reown/appkit/react'; 
+import ChatContainer from './components/Chat';
+import DocsView from './pages/ViewDocumemt';
+import DocsFlow from './pages/DocsFlow';
+import AdminDashboard from './pages/AdminDashboard';
+import UserDashboard from './pages/UserDashboard';
 const App = () => {
+  const { address,isConnected } = useAppKitAccount();  
+
   return (
     <div>
       <Header />
@@ -29,25 +36,34 @@ const App = () => {
       <Routes>
          <Route path="/" element={<Home />} />
         <Route path="/create" element={<PropertyForm />} />
-        {/* <Route path="/kyc" element={<KYCForm />} /> */}
+      
         <Route path="/kyc" element={<ProtectedKYC><KYCForm /></ProtectedKYC>} />
 
         <Route path="/properties" element={<AllProperties  />} />
-        <Route path="/me" element={<MyProperties  />} />
+        <Route path="/my-property" element={<MyProperties  />} />
         <Route path="/success" element={<ThunderSuccess />} />
         <Route path="/terms" element={<TermsAndConditions />} />
         <Route path="/about" element={<About />} />
         <Route path="/contact" element={<ContactAdmin />} />
-        <Route path="/properties/:id/update" element={<UpdateProperty />} />
+        <Route path="/:id/update" element={<UpdateProperty />} />
 
         <Route path="/properties/:id" element={<PropertyDetails />} />
         <Route path="/faq" element={<FAQ />} />
-        <Route path="/chat" element={<ChatPage />} />
+      
+
         <Route path="/privacy" element={<PrivacyPolicy />} />
-        <Route path="/dashboard" element={<KycAdminPanel />} />
+        <Route path="/approve" element={<KYCApprove />} />
+        <Route path="/docs/:propertyId" element={<DocsFlow />} />
 
-
+        
+             <Route
+          path="/chat"
+          element={<ChatPage currentUserId={address} />}/>
+        <Route path='/view/:propertyId' element={<DocsView/>}/>
+          <Route path="/admin-dashboard" element={<AdminDashboard />} />
+        <Route path="/users" element={<UserDashboard />} />
       </Routes>
+   
       <ToastContainer position='bottom-center' theme='dark'/>
     </div>
   )

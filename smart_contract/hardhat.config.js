@@ -3,16 +3,16 @@ require("dotenv").config();
 /** @type import('hardhat/config').HardhatUserConfig */
 
 
-const { PRIVATE_KEY } = process.env;
+const { PRIVATE_KEY, ALCHEMY_RPC_URL } = process.env;
 module.exports = {
-  defaultNetwork: "celoAlfajores",
+  defaultNetwork: "celoSepolia",
   networks: {
     hardhat: {
     },
-    celoAlfajores: {
-      url: 'https://alfajores-forno.celo-testnet.org',
-      // `https://celo-alfajores.infura.io/v3/${INFURA_API_KEY}` ,
-      // "https://alfajores-forno.celo-testnet.org",
+    celoSepolia: {
+      url: `https://celo-sepolia.g.alchemy.com/v2/${ALCHEMY_RPC_URL}`,
+      // ALCHEMY_RPC_URL,
+     
       accounts: [`0x${PRIVATE_KEY}`]
     }
   },

@@ -1,3 +1,5 @@
+
+
 import React, { useEffect } from "react";
 import Chat from "../components/Chat";
 import { useSelector, useDispatch } from "react-redux";
@@ -6,11 +8,13 @@ import {
   setCurrentUser,
   setChatTarget,
 } from "../redux/slices/chatSlice";
+import {useGetAllProperties} from "../hooks/useBlockchain";
 import { useAppKitAccount } from "@reown/appkit/react"; 
 
 export default function ChatPage() {
   const dispatch = useDispatch();
-  const { address, isConnected } = useAppKitAccount(); 
+  const { address, isConnected } = useAppKitAccount();
+  const { property } = useGetAllProperties();
 
   const {
     currentUserId,
@@ -33,9 +37,15 @@ export default function ChatPage() {
     }
 
     
-    if (!targetUserId) {
-      dispatch(setChatTarget({ id: "admin-001", fullName: "Admin Support" }));
-    }
+    // if (!targetUserId) {
+    //   dispatch(setChatTarget({ id: "admin-001", fullName: "Admin Support" }));
+    // }
+    if (!targetUserId && property?.seller) {
+  dispatch(setChatTarget({
+    id: property.seller, 
+    fullName: property.seller.slice(0, 6)
+  }));
+}
   }, [dispatch, isConnected, address, currentUserId, targetUserId]);
 
   if (!currentUserId || !targetUserId) {

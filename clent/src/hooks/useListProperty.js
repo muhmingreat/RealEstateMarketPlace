@@ -2,21 +2,22 @@ import { useCallback } from "react";
 import useContractInstance from "./useContractInstance";
 import { useAppKitAccount, useAppKitNetwork } from "@reown/appkit/react";
 import { toast } from "react-toastify";
-import { celoAlfajores } from "@reown/appkit/networks";
+import {  celoSepolia } from '../config/sepolia';
 import { ErrorDecoder } from "ethers-decode-error";
 import { useDispatch } from "react-redux";
 import { addProperty, setLoading, setError } from
  "../redux/slices/realEstateSlice"; 
 
 const useListProperty = () => {
-  const contract = useContractInstance("realEstate", true);
+  const contract = useContractInstance( true);
   const { address } = useAppKitAccount();
   const { chainId } = useAppKitNetwork();
   const dispatch = useDispatch();
 
   return useCallback(
-    async (owner, price, title, category, images, propertyAddress, description) => {
-      if (!owner || !price || !title || !category || !images || !propertyAddress || !description) {
+    async (owner, price, title, category, images, propertyAddress, description, metadataURI) => {
+      if (!owner || !price || !title || !category || !images ||
+         !propertyAddress || !description || !metadataURI) {
         toast.error("All fields are required");
         return;
       }
@@ -28,7 +29,7 @@ const useListProperty = () => {
         toast.error("Contract not found");
         return;
       }
-      if (Number(chainId) !== Number(celoAlfajores.id)) {
+      if (Number(chainId) !== Number(celoSepolia.id)) {
         toast.error("You're not connected to celoAfajores");
         return;
       }
@@ -43,7 +44,8 @@ const useListProperty = () => {
           category,
           images,
           propertyAddress,
-          description
+          description,
+          metadataURI
         );
 
         const tx = await contract.listProperty(
@@ -54,6 +56,7 @@ const useListProperty = () => {
           images,
           propertyAddress,
           description,
+          metadataURI,
           {
             gasLimit: (estimatedGas * BigInt(120)) / BigInt(100),
           }
@@ -64,17 +67,18 @@ const useListProperty = () => {
         if (receipt.status === 1) {
           toast.success("Property listed successfully");
 
-          // Push the new property into Redux
+        
           dispatch(
             addProperty({
-              productID: receipt.logs[0]?.topics[1], // or fetch from contract
+              productID: receipt.logs[0]?.topics[1], 
               owner,
-              price,
+              price: price.toString(),
               title,
               category,
               images,
               propertyAddress,
               description,
+              metadataURI,
             })
           );
 
@@ -88,7 +92,7 @@ const useListProperty = () => {
       } catch (error) {
         const errorDecoder = ErrorDecoder.create();
         const decodeError = await errorDecoder.decode(error);
-        console.error("Error from creating property", error);
+        console.error("Error from creating property",decodeError);
         toast.error(decodeError?.reason || "Error listing property");
         dispatch(setError(decodeError?.reason || error.message));
         dispatch(setLoading(false));

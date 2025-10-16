@@ -20,6 +20,7 @@ export default function SearchBar() {
       const title = p?.title?.toLowerCase() || "";
       const location = p?.location?.toLowerCase() || "";
       const agent = p?.agent?.toLowerCase() || "";
+
       const rateStr = (p?.rate ?? p?.rating ?? p?.averageRating ?? "")
         .toString()
         .toLowerCase();
@@ -70,7 +71,8 @@ export default function SearchBar() {
               {filteredProperties.map((property) => (
                 <motion.div
                   key={property.productID}
-                  className="bg-white bg-opacity-10 backdrop-blur-md rounded-2xl p-4 shadow-lg hover:shadow-xl cursor-pointer transition"
+                  className="bg-white bg-opacity-10 backdrop-blur-md
+                   rounded-2xl p-4 shadow-lg hover:shadow-xl cursor-pointer transition"
                   initial={{ opacity: 0, y: 20 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ duration: 0.3 }}
@@ -84,8 +86,14 @@ export default function SearchBar() {
                     alt={property.title}
                     className="w-full h-44 object-cover rounded-lg my-3 border border-white/20"
                   />
-                  <p className="text-sm">📍 {property.location || "—"}</p>
-                  <p className="text-sm">💰 {property.price} ETH</p>
+                  <p className="text-sm"> {property.location || "—"}</p>
+                  
+                  <p className="text-sm">
+                    {Number.isFinite(Number(property.price))
+                      ? (Number(property.price) / 1e18).toFixed(2)
+                      : "—"} Celo
+                  </p>
+                  
                   {property.rate != null && (
                     <p className="text-sm">⭐ {property.rate}</p>
                   )}

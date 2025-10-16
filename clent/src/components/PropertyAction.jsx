@@ -1,655 +1,288 @@
-import React, { useEffect, useMemo, useState } from "react";
-import {
-  useResolveDispute,
-  useConfirmPurchase,
-  useDepositPayment,
-  useGetRequiredEth,
-} from "../hooks/useBlockchain";
+import React, { useState, useMemo, useEffect } from "react";
 import { useAppKitAccount } from "@reown/appkit/react";
 import { ethers } from "ethers";
+import { useDispatch, useSelector } from "react-redux";
+import {
+  useDepositPayment,
+  useConfirmPurchase,
+  useResolveDispute,
+  useGetRequiredEth,
+  useClaimExpiredEscrow,
+} from "../hooks/useBlockchain";
+
+import useContractInstance from "../hooks/useContractInstance";
+import {
+  escrowStart,
+  escrowSuccess,
+  escrowFail,
+  escrowReset,
+} from "../redux/slices/escrowSlice";
 
 export default function PropertyActions({ property, adminAddress, refetchProperty }) {
+  const { address } = useAppKitAccount();
+  const dispatch = useDispatch();
+  const { loading, txHash } = useSelector((state) => state.escrow);
+  const contract = useContractInstance(true);
+
   const depositPayment = useDepositPayment();
   const confirmPurchase = useConfirmPurchase();
   const resolveDispute = useResolveDispute();
   const getRequiredEth = useGetRequiredEth();
-  const { address } = useAppKitAccount();
+  const claimExpiredEscrow = useClaimExpiredEscrow();
 
-  const [loading, setLoading] = useState(false);
-  // 'deposit' | 'confirm' | 'resolve' | null
   const [pending, setPending] = useState(null);
+  const [onChainEscrow, setOnChainEscrow] = useState(null);
+  const [expiresAtMs, setExpiresAtMs] = useState(null);
+  const [escrowExpired, setEscrowExpired] = useState(false);
 
-  if (!property) return null;
+  if (!property) {
+    return <div className="p-4 border rounded-lg bg-gray-50">No property selected</div>;
+  }
 
-  // ---- helpers ----
-  const toBigInt = (v) => {
-    try {
-
-      if (value == null) return Number(0);
-      if (typeof value === "bigint") return value;
-      if (typeof value === "number") return BigInt(value);
-      if (typeof value === "string") return value ? BigInt(value) : Number(0);
-      if (typeof value === "object" && value.toString) return BigInt(value.toString());
-    } catch {}
-    return Number(0);
-  };
-
-  // fallback escrow
-  const escrow = property.escrow || {
-    buyer: ethers.ZeroAddress,
-    amount: 0, // may be number/string/bignumber
-    confirmed: false,
-    refunded: false,
-  };
-
-  const amountWei = toBigInt(escrow.amount);
-
-  // normalize addresses
+  // --- normalize addresses ---
   const currentAddress = address ? ethers.getAddress(address) : null;
   const sellerAddress = property.seller ? ethers.getAddress(property.seller) : null;
-  const buyerAddress =
-    escrow.buyer && escrow.buyer !== ethers.ZeroAddress ? ethers.getAddress(escrow.buyer) : null;
   const adminAddr = adminAddress ? ethers.getAddress(adminAddress) : null;
 
-  // derive role
+  // --- fetch escrow from chain ---
+  useEffect(() => {
+    let mounted = true;
+    async function fetchEscrowFromChain() {
+      try {
+        if (!contract || property?.id == null) return;
+        const id = BigInt(property.id);
+        const raw = await contract.escrows(id);
+        const escrow = {
+          buyer: raw[0],
+          amount: BigInt(raw[1].toString()),
+          confirmed: Boolean(raw[2]),
+          refunded: Boolean(raw[3]),
+          createdAtSeconds: Number(raw[4].toString()),
+          expiresAtSeconds: Number(raw[5].toString()),
+        };
+        if (mounted) setOnChainEscrow(escrow);
+      } catch (err) {
+        console.error("fetchEscrowFromChain error", err);
+      }
+    }
+    fetchEscrowFromChain();
+    return () => { mounted = false; };
+  }, [contract, property?.id]);
+
+  // --- calculate expiresAt in ms ---
+  useEffect(() => {
+    if (!onChainEscrow) return;
+    if (onChainEscrow.expiresAtSeconds && onChainEscrow.expiresAtSeconds > 0) {
+      setExpiresAtMs(onChainEscrow.expiresAtSeconds * 1000);
+    } else if (onChainEscrow.createdAtSeconds > 0) {
+      // fallback: derive from createdAt + MAX_ESCROW_DURATION
+      (async () => {
+        try {
+          const maxDuration = await contract.MAX_ESCROW_DURATION();
+          setExpiresAtMs((onChainEscrow.createdAtSeconds + Number(maxDuration)) * 1000);
+        } catch (err) {
+          console.error("MAX_ESCROW_DURATION fetch failed", err);
+        }
+      })();
+    }
+  }, [onChainEscrow, contract]);
+
+  // --- expiry watcher ---
+  useEffect(() => {
+    if (!expiresAtMs || !onChainEscrow) {
+      setEscrowExpired(false);
+      return;
+    }
+    const now = Date.now();
+    if (now >= expiresAtMs) {
+      setEscrowExpired(true);
+      return;
+    }
+    const timeout = setTimeout(() => setEscrowExpired(true), expiresAtMs - now);
+    return () => clearTimeout(timeout);
+  }, [expiresAtMs, onChainEscrow]);
+
+  // --- determine role ---
   let role = "guest";
   if (currentAddress) {
-    if (sellerAddress && currentAddress === sellerAddress) role = "seller";
-    else if (adminAddr && currentAddress === adminAddr) role = "admin";
+    if (currentAddress === sellerAddress) role = "seller";
+    else if (currentAddress === adminAddr) role = "admin";
     else role = "buyer";
   }
 
-  // chain-derived status
-  const chainStatus = escrow.confirmed
-    ? "Confirmed"
-    : escrow.refunded
-    ? "Disputed"
-    : amountWei > 0n
-    ? "Deposited"
-    : "Listed";
+  // --- derive status ---
+  const amountWei = onChainEscrow?.amount ?? 0n;
+  const chainStatus = onChainEscrow?.confirmed
+  ? "Confirmed"
+  : onChainEscrow?.refunded
+  ? "Listed"   // after refund or claim, reset back to Listed
+  : amountWei > 0n
+  ? "Deposited"
+  : "Listed";
 
-  // optimistic UI: if we just sent a deposit tx but haven't refetched yet
+
   const status = useMemo(() => {
+    if (escrowExpired && !onChainEscrow?.refunded) return "Expired";
+
     if (chainStatus === "Listed" && pending === "deposit") return "DepositedPending";
     return chainStatus;
-  }, [chainStatus, pending]);
+  }, [chainStatus, pending, escrowExpired, onChainEscrow?.refunded]);
 
-  const someoneElseDeposited =
-    (status === "Deposited" || status === "DepositedPending") &&
-    buyerAddress &&
-    currentAddress !== buyerAddress;
-
-  // when chain state catches up, clear pending
-  useEffect(() => {
-    if (chainStatus === "Deposited" || chainStatus === "Confirmed" || chainStatus === "Disputed") {
-      setPending(null);
-    }
-  }, [chainStatus]);
-
-  // on wallet switch, refetch the property so UI reflects who’s connected
-  useEffect(() => {
-    if (refetchProperty) refetchProperty();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [address]);
-
-  // ---- handlers ----
+  // --- Handlers ---
   const handleDeposit = async () => {
     try {
-      setLoading(true);
-      setPending("deposit"); // optimistic: hide the button immediately
-      const requiredEth = await getRequiredEth(property.id);
-      if (!requiredEth) return;
-      const duration = 7 * 24 * 60 * 60;
-      const tx = await depositPayment(property.id, duration, requiredEth);
-      // if hook returns a tx object (ethers v6), wait for mining
-      await tx?.wait?.();
-      await refetchProperty?.();
-    } catch (error) {
-      console.error("Deposit failed:", error);
-      setPending(null); // rollback optimistic state on error
+      dispatch(escrowStart());
+      setPending("deposit");
+      const result = await getRequiredEth(property.id);
+      if (!result?.raw) throw new Error("Required ETH missing");
+      const duration = 10 * 60;
+      const txHash = await depositPayment(property.id, duration, result.raw);
+      dispatch(escrowSuccess(txHash));
+      if (refetchProperty) await refetchProperty();
+    } catch (err) {
+      console.error("Deposit failed:", err);
+      dispatch(escrowFail(err?.message || "Deposit failed"));
     } finally {
-      setLoading(false);
+      setPending(null);
     }
   };
 
   const handleConfirm = async () => {
     try {
-      setLoading(true);
+      // extra guard: block confirm if expired
+      if (expiresAtMs && Date.now() >= expiresAtMs) {
+        console.warn("Escrow expired  cannot confirm");
+        dispatch(escrowFail("Escrow expired  claim refund instead"));
+        return;
+      }
+      dispatch(escrowStart());
       const tx = await confirmPurchase(property.id);
       await tx?.wait?.();
-      await refetchProperty?.();
-    } catch (error) {
-      console.error("Confirm failed:", error);
-    } finally {
-      setLoading(false);
+      dispatch(escrowSuccess(tx.hash));
+      if (refetchProperty) await refetchProperty();
+    } catch (err) {
+      console.error("Confirm failed:", err);
+      dispatch(escrowFail(err?.message || "Confirm failed"));
     }
   };
 
   const handleResolve = async (refundBuyer) => {
     try {
-      setLoading(true);
+      dispatch(escrowStart());
       const tx = await resolveDispute(property.id, refundBuyer);
       await tx?.wait?.();
-      await refetchProperty?.();
-    } catch (error) {
-      console.error("Resolve failed:", error);
-    } finally {
-      setLoading(false);
+      dispatch(escrowSuccess(tx.hash));
+      if (refetchProperty) await refetchProperty();
+    } catch (err) {
+      console.error("Resolve failed:", err);
+      dispatch(escrowFail(err?.message || "Resolve failed"));
     }
   };
 
-  // ---- UI decision ----
-  function getActionUI() {
-    // always show sealed if confirmed
-    if (status === "Confirmed") {
-      return <p className="text-green-600 font-semibold">Deal sealed!</p>;
-    }
 
-    // guest
+  const handleClaimExpired = async () => {
+  try {
+    dispatch(escrowStart());
+    const tx = await claimExpiredEscrow(property.id);
+    await tx?.wait?.();
+    dispatch(escrowSuccess(tx.hash));
+
+    // ✅ reset UI to "Listed" after claim
+    setOnChainEscrow({
+      buyer: ethers.ZeroAddress,
+      amount: 0n,
+      confirmed: false,
+      refunded: true,   // mark as refunded
+      createdAtSeconds: 0,
+      expiresAtSeconds: 0,
+    });
+    setEscrowExpired(false);
+
+    if (refetchProperty) await refetchProperty();
+  } catch (err) {
+    console.error("Claim expired escrow failed:", err);
+    dispatch(escrowFail(err?.message || "Claim expired escrow failed"));
+  }
+};
+
+
+  useEffect(() => () => dispatch(escrowReset()), [dispatch]);
+
+  // --- Render ---
+  const getActionUI = () => {
+    if (status === "Confirmed") {
+      return <button disabled className="px-4 py-2
+       bg-green-600 text-white rounded-lg">Deal sealed!</button>;
+    }
+    if (status === "Expired") {
+      if (role === "buyer") {
+        return <button onClick={handleClaimExpired} disabled={loading} 
+        className="px-4 py-2 bg-red-600 text-white rounded-lg">
+          {loading ? "Claiming..." : "Claim Refund (Escrow Expired)"}</button>;
+      }
+      return <button disabled className="px-4 py-2 bg-red-500
+       text-white rounded-lg cursor-not-allowed">Escrow expired</button>;
+    }
     if (role === "guest") {
       return <p className="text-gray-500">Connect wallet to perform actions.</p>;
     }
-
-    // seller
-    if (role === "seller") {
-      if (status === "Listed") {
-        return <p className="text-blue-600 font-semibold">Waiting for Buyer</p>;
-      }
-      if (status === "Deposited" || status === "DepositedPending") {
-        return (
-          <button
-            onClick={handleConfirm}
-            disabled={loading}
-            className="px-4 py-2 bg-green-600 text-white rounded-lg"
-          >
-            {loading ? "Confirming..." : "Confirm Payment"}
-          </button>
-        );
-      }
+    if (role === "seller" && status === "Listed") {
+      return <button disabled className="px-4 py-2
+       bg-green-600 text-white rounded-lg cursor-not-allowed">
+        available to purchase</button>;
     }
-
-    // buyer
     if (role === "buyer") {
       if (status === "Listed") {
-        // prevent showing deposit while we have an optimistic pending deposit
-        return (
-          <button
-            onClick={handleDeposit}
-            disabled={loading || pending === "deposit"}
-            className="px-4 py-2 bg-blue-600 text-white rounded-lg disabled:opacity-60"
-          >
-            {loading || pending === "deposit" ? "Processing..." : "Deposit Payment"}
-          </button>
-        );
+        return <button onClick={handleDeposit} disabled={loading || pending === "deposit"} 
+        
+        className="px-4 py-2 bg-blue-600 text-white rounded-lg disabled:opacity-60">
+          {loading || pending === "deposit" ? "Processing..." : "Buy Property"}</button>;
       }
       if (status === "Deposited" || status === "DepositedPending") {
-        return (
-          <p className="text-yellow-600 font-semibold">
-            Transaction in progress, waiting for seller confirmation…
-          </p>
-        );
+        return <button onClick={handleConfirm} disabled={loading} 
+        className="px-4 py-2 bg-green-600 text-white rounded-lg">
+          {loading ? "Confirming..." : "Confirm Payment"}</button>;
       }
     }
-
-    // admin
     if (role === "admin") {
-      if (status === "Listed") {
-        return (
-          <button
-            onClick={handleDeposit}
-            disabled={loading || pending === "deposit"}
-            className="px-4 py-2 bg-blue-600 text-white rounded-lg disabled:opacity-60"
-          >
-            {loading || pending === "deposit" ? "Processing..." : "Deposit Payment"}
-          </button>
-        );
-      }
       if (status === "Deposited" || status === "DepositedPending") {
-        return (
-          <button
-            onClick={() => handleResolve(false)}
-            disabled={loading}
-            className="px-4 py-2 bg-green-600 text-white rounded-lg"
-          >
-            {loading ? "Processing..." : "Release to Seller"}
-          </button>
-        );
+        return <button onClick={() => handleResolve(false)} disabled={loading} 
+        className="px-4 py-2 bg-green-600 text-white rounded-lg">
+          {loading ? "Processing..." : "Release to Seller"}</button>;
       }
       if (status === "Disputed") {
         return (
           <div className="flex gap-3 mt-3">
-            <button
-              onClick={() => handleResolve(true)}
-              disabled={loading}
-              className="px-4 py-2 bg-red-600 text-white rounded-lg"
-            >
-              {loading ? "Resolving..." : "Refund Buyer"}
-            </button>
-            <button
-              onClick={() => handleResolve(false)}
-              disabled={loading}
-              className="px-4 py-2 bg-green-600 text-white rounded-lg"
-            >
-              {loading ? "Resolving..." : "Release to Seller"}
-            </button>
+            <button onClick={() => handleResolve(true)} 
+            disabled={loading} className="px-4 py-2
+             bg-red-600 text-white rounded-lg">
+              {loading ? "Resolving..." : "Refund Buyer"}</button>
+            <button onClick={() => handleResolve(false)
+
+            } disabled={loading} className="px-4 py-2
+             bg-green-600 text-white rounded-lg">
+              {loading ? "Resolving..." : "Release to Seller"}</button>
           </div>
         );
       }
     }
-
-    // other accounts (non-seller/non-admin) when someone else already deposited
-    if (someoneElseDeposited) {
-      return (
-        <p className="text-yellow-600 font-semibold">
-          Transaction in progress, waiting for seller confirmation…
-        </p>
-      );
-    }
-
     return null;
-  }
+  };
 
-  return <div>{getActionUI()}</div>;
+  return (
+    <div className="space-y-4 p-2 border rounded-lg bg-gradient-to-bl from-yellow-400 via-pink-100 to-pink-200">
+      <p className="text-sm bg-gradient-to-br from-blue-500 via-pink-300 to-pink-700 bg-clip-text">
+        Role: {role} | Status: {status}
+      </p>
+      {getActionUI()}
+      {txHash && (
+        <p className="text-sm text-gray-500">
+          Tx: <a href={`https://celoscan.io/tx/${txHash}`} target="_blank" rel="noreferrer">{txHash}</a>
+        </p>
+      )}
+    </div>
+  );
 }
-
-
-
-
-// import React, { useState } from "react";
-// import {
-//   useResolveDispute,
-//   useConfirmPurchase,
-//   useDepositPayment,
-//   useGetRequiredEth
-// } from "../hooks/useBlockchain";
-// import { useAppKitAccount } from "@reown/appkit/react";
-// import { ethers } from "ethers";
-
-// export default function PropertyActions({ property, adminAddress }) {
-//   const depositPayment = useDepositPayment();
-//   const confirmPurchase = useConfirmPurchase();
-//   const resolveDispute = useResolveDispute();
-//   const { address } = useAppKitAccount();
-//   const [loading, setLoading] = useState(false);
-//   const getRequiredEth = useGetRequiredEth();
-
-//   if (!property) return null;
-
-//   // fallback escrow
-//   const escrow = property.escrow || {
-//     buyer: ethers.ZeroAddress,
-//     amount: Number(0),
-//     confirmed: false,
-//     refunded: false,
-//   };
-
-//   // derive status
-//   const status =
-//     escrow.amount > 0
-//       ? escrow.confirmed
-//         ? "Confirmed"
-//         : escrow.refunded
-//         ? "Disputed"
-//         : "Deposited"
-//       : "Listed";
-
-//   const currentAddress = address ? ethers.getAddress(address) : null;
-//   const sellerAddress = ethers.getAddress(property.seller);
-//   const buyerAddress =
-//     escrow.buyer && escrow.buyer !== ethers.ZeroAddress
-//       ? ethers.getAddress(escrow.buyer)
-//       : null;
-//   const adminAddr = ethers.getAddress(adminAddress);
-
-//   let role = "guest";
-//   if (currentAddress) {
-//     if (currentAddress === sellerAddress) {
-//       role = "seller";
-//     } else if (currentAddress === adminAddr) {
-//       role = "admin";
-//     } else {
-//       role = "buyer";
-//     }
-//   }
-
-//   // ------------------------
-//   // Handlers
-//   // ------------------------
-//   const handleDeposit = async () => {
-//     try {
-//       setLoading(true);
-//       const requiredEth = await getRequiredEth(property.id);
-//       if (!requiredEth) return;
-//       const duration = 7 * 24 * 60 * 60;
-//       await depositPayment(property.id, duration, requiredEth);
-//     } catch (error) {
-//       console.error("Deposit failed:", error);
-//     } finally {
-//       setLoading(false);
-//     }
-//   };
-
-//   const handleConfirm = async () => {
-//     try {
-//       setLoading(true);
-//       await confirmPurchase(property.id);
-//     } catch (error) {
-//       console.error("Confirm failed:", error);
-//     } finally {
-//       setLoading(false);
-//     }
-//   };
-
-//   const handleResolve = async (refundBuyer) => {
-//     try {
-//       setLoading(true);
-//       await resolveDispute(property.id, refundBuyer);
-//     } catch (error) {
-//       console.error("Resolve failed:", error);
-//     } finally {
-//       setLoading(false);
-//     }
-//   };
-
-//   // ------------------------
-//   // Role/Status Decision Logic
-//   // ------------------------
-//   function getActionUI() {
-//     // ✅ Always show when deal is sealed
-//     if (status === "Confirmed") {
-//       return <p className="text-green-600 font-semibold">Deal sealed!</p>;
-//     }
-
-//     // 🕵 Guest
-//     if (role === "guest") {
-//       return (
-//         <p className="text-gray-500">Connect wallet to perform actions.</p>
-//       );
-//     }
-
-//     // 🏠 Seller
-//     if (role === "seller") {
-//       if (status === "Listed") {
-//         return (
-//           <p className="text-blue-600 font-semibold">Waiting for Buyer</p>
-//         );
-//       }
-//       if (status === "Deposited") {
-//         return (
-//           <button
-//             onClick={handleConfirm}
-//             disabled={loading}
-//             className="px-4 py-2 bg-green-600 text-white rounded-lg"
-//           >
-//             {loading ? "Confirming..." : "Confirm Payment"}
-//           </button>
-//         );
-//       }
-//     }
-
-//     // 💳 Buyer
-//     if (role === "buyer") {
-//       if (status === "Listed") {
-//         return (
-//           <button
-//             onClick={handleDeposit}
-//             disabled={loading}
-//             className="px-4 py-2 bg-blue-600 text-white rounded-lg"
-//           >
-//             {loading ? "Processing..." : "Deposit Payment"}
-//           </button>
-//         );
-//       }
-//       if (status === "Deposited") {
-//         // someone already deposited
-//         return (
-//           <p className="text-yellow-600 font-semibold">
-//             Transaction in progress, waiting for seller confirmation…
-//           </p>
-//         );
-//       }
-//     }
-
-//     // 🛠 Admin
-//     if (role === "admin") {
-//       if (status === "Listed") {
-//         return (
-//           <button
-//             onClick={handleDeposit}
-//             disabled={loading}
-//             className="px-4 py-2 bg-blue-600 text-white rounded-lg"
-//           >
-//             {loading ? "Processing..." : "Deposit Payment"}
-//           </button>
-//         );
-//       }
-//       if (status === "Deposited") {
-//         return (
-//           <button
-//             onClick={() => handleResolve(false)}
-//             disabled={loading}
-//             className="px-4 py-2 bg-green-600 text-white rounded-lg"
-//           >
-//             {loading ? "Processing..." : "Release to Seller"}
-//           </button>
-//         );
-//       }
-//       if (status === "Disputed") {
-//         return (
-//           <div className="flex gap-3 mt-3">
-//             <button
-//               onClick={() => handleResolve(true)}
-//               disabled={loading}
-//               className="px-4 py-2 bg-red-600 text-white rounded-lg"
-//             >
-//               {loading ? "Resolving..." : "Refund Buyer"}
-//             </button>
-//             <button
-//               onClick={() => handleResolve(false)}
-//               disabled={loading}
-//               className="px-4 py-2 bg-green-600 text-white rounded-lg"
-//             >
-//               {loading ? "Resolving..." : "Release to Seller"}
-//             </button>
-//           </div>
-//         );
-//       }
-//     }
-
-//     return null;
-//   }
-
-//   // ------------------------
-//   // Render
-//   // ------------------------
-//   return <div>{getActionUI()}</div>;
-// }
-
-
-
-
-// // import React, { useState } from "react";
-// // import {
-// //   useResolveDispute,
-// //   useConfirmPurchase,
-// //   useDepositPayment
-// // } from "../hooks/useBlockchain";
-// // import { useAppKitAccount } from "@reown/appkit/react";
-// // import { ethers } from "ethers";
-// // import { useGetRequiredEth } from "../hooks/useBlockchain";
-
-// // export default function PropertyActions({ property, adminAddress }) {
-// //   const depositPayment = useDepositPayment();
-// //   const confirmPurchase = useConfirmPurchase();
-// //   const resolveDispute = useResolveDispute();
-// //   const { address } = useAppKitAccount();
-// //   const [loading, setLoading] = useState(false);
-// //   const getRequiredEth = useGetRequiredEth();
-
-// //   if (!property) return null;
-
-// //   // fallback escrow
-// //   const escrow = property.escrow || {
-// //     buyer: ethers.ZeroAddress,
-// //     amount: Number(0),
-// //     confirmed: false,
-// //     refunded: false,
-// //   };
-
-// //   // derive status
-// //   const status =
-// //     escrow.amount > Number(0)
-// //       ? escrow.confirmed
-// //         ? "Confirmed"
-// //         : escrow.refunded
-// //         ? "Disputed"
-// //         : "Deposited"
-// //       : "Listed";
-
-  
-// //   const currentAddress = address ? ethers.getAddress(address) : null;
-// //   const sellerAddress = ethers.getAddress(property.seller);
-// //   const buyerAddress = escrow.buyer ? ethers.getAddress(escrow.buyer) : null;
-// //   const adminAddr = ethers.getAddress(adminAddress);
-
-  
-// //   let role = "guest";
-// //   if (currentAddress) {
-// //     if (currentAddress === sellerAddress) {
-// //       role = "seller";
-// //     } else if (currentAddress === adminAddr) {
-// //       role = "admin";
-// //     } else {
-// //       role = "buyer";
-// //     }
-// //   }
-
-
-// //   const handleDeposit = async () => {
-// //     try {
-// //       setLoading(true);
-// //       const requiredEth = await getRequiredEth(property.id);
-// //       if (!requiredEth) return;
-// //       const duration = 7 * 24 * 60 * 60;
-// //       await depositPayment(property.id, duration, requiredEth);
-// //     } catch (error) {
-// //       console.error("Deposit failed:", error);
-// //     } finally {
-// //       setLoading(false);
-// //     }
-// //   };
-
-// //   const handleConfirm = async () => {
-// //     try {
-// //       setLoading(true);
-// //       await confirmPurchase(property.id);
-// //     } catch (error) {
-// //       console.error("Confirm failed:", error);
-// //     } finally {
-// //       setLoading(false);
-// //     }
-// //   };
-
-// //   const handleResolve = async (refundBuyer) => {
-// //     try {
-// //       setLoading(true);
-// //       await resolveDispute(property.id, refundBuyer);
-// //     } catch (error) {
-// //       console.error("Resolve failed:", error);
-// //     } finally {
-// //       setLoading(false);
-// //     }
-// //   };
-
-// //   return (
-// //     <div>
-// //       {/* <h2 className="text-lg font-bold mb-3">Actions</h2> */}
-
-// //       {status === "Confirmed" &&  (
-// //         <p className="text-green-600 font-semibold">
-// //             Deal sealed!
-// //         </p>
-// //       )}
-
-    
-// //       {role === "guest" && status !== "Confirmed" && (
-// //         <p className="text-gray-500">Connect wallet to perform actions.</p>
-// //       )}
-
-    
-// //       {role === "seller" && status === "Listed" && (
-// //         <p className="text-blue-600 font-semibold">
-// //              Waiting for Buyer
-// //         </p>
-// //       )}
-// //       {role === "seller" && status === "Deposited" && (
-// //         <button
-// //           onClick={handleConfirm}
-// //           disabled={loading}
-// //           className="px-4 py-2 bg-green-600 text-white rounded-lg"
-// //         >
-// //           {loading ? "Confirming..." : "Confirm Payment"}
-// //         </button>
-// //       )}
-
-    
-// //       {role === "buyer" && status === "Listed" && (
-// //         <button
-// //           onClick={handleDeposit}
-// //           disabled={loading}
-// //           className="px-4 py-2 bg-blue-600 text-white rounded-lg"
-// //         >
-// //           {loading ? "Processing..." : "Deposit Payment"}
-// //         </button>
-// //       )}
-
-      
-// //       {role === "admin" && (
-// //         <>
-// //           {status === "Listed" && (
-// //             <button
-// //               onClick={handleDeposit}
-// //               disabled={loading}
-// //               className="px-4 py-2 bg-blue-600 text-white rounded-lg"
-// //             >
-// //               {loading ? "Processing..." : "Deposit Payment"}
-// //             </button>
-// //           )}
-
-// //           {status === "Deposited" && (
-// //             <button
-// //               onClick={() => handleResolve(false)}
-// //               disabled={loading}
-// //               className="px-4 py-2 bg-green-600 text-white rounded-lg"
-// //             >
-// //               {loading ? "Processing..." : "Release to Seller"}
-// //             </button>
-// //           )}
-
-// //           {status === "Disputed" && (
-// //             <div className="flex gap-3 mt-3">
-// //               <button
-// //                 onClick={() => handleResolve(true)}
-// //                 disabled={loading}
-// //                 className="px-4 py-2 bg-red-600 text-white rounded-lg"
-// //               >
-// //                 {loading ? "Resolving..." : "Refund Buyer"}
-// //               </button>
-// //               <button
-// //                 onClick={() => handleResolve(false)}
-// //                 disabled={loading}
-// //                 className="px-4 py-2 bg-green-600 text-white rounded-lg"
-// //               >
-// //                 {loading ? "Resolving..." : "Release to Seller"}
-// //               </button>
-// //             </div>
-// //           )}
-// //         </>
-// //       )}
-// //     </div>
-// //   );
-// // }
-
 
 
 

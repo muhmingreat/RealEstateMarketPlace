@@ -1,65 +1,32 @@
 const { buildModule } = require("@nomicfoundation/hardhat-ignition/modules");
 
+const mockAddress ='0x7b171287EDE20bF8dE49F0FEeA89CE64a20F5031'
+
 module.exports = buildModule("RealEstateModule", (m) => {
-  // Deploy RealEstate (it will deploy its internal NFT)
-  const realEstate = m.contract("RealEstate", [], {
+  // For now: dummy values, because you're still in dev mode
+  const chainlinkOracle   = "0x0000000000000000000000000000000000000001"; 
+  const chainlinkJobId    = ethers.encodeBytes32String("dummy-job"); 
+  const chainlinkFee      = ethers.parseEther("0"); 
+  
+  const linkTokenAddress  = "0x0000000000000000000000000000000000000001"; 
+    const mockOracle        = mockAddress // NEW
+
+  // Deploy RealEstate
+  const realEstate = m.contract("RealEstate", [
+    // chainlinkOracle,
+    // chainlinkJobId,
+    // chainlinkFee,
+    // linkTokenAddress,
+    // mockOracle
+  ], {
     afterDeploy: async (ctx) => {
-      // The internal NFT address is stored in the propertyNFT state variable
       const nftAddress = await ctx.contract.propertyNFT();
-      console.log("RealEstate deployed at:", ctx.contract.address);
-      console.log("Internal RealEstateNFT deployed at:", nftAddress);
+      console.log("✅ RealEstate deployed at:", ctx.contract.address);
+      console.log("✅ Internal RealEstateNFT deployed at:", nftAddress);
     },
   });
 
   return { realEstate };
 });
 
-
-
-// const { buildModule } = require("@nomicfoundation/hardhat-ignition/modules");
-
-// module.exports = buildModule("RealEstateModule", (m) => {
-//   // Deploy NFT first
-//   const propertyNFT = m.contract("RealEstateNFT");
-
-//   // Deploy RealEstate with the NFT address
-//   const realEstate = m.contract("RealEstate", [propertyNFT], {
-//     afterDeploy: async (ctx) => {
-//       console.log("RealEstate deployed with NFT:", propertyNFT.address);
-//     },
-//   });
-
-//   return { propertyNFT, realEstate };
-// });
-
-
-
-
-// const { buildModule } = require("@nomicfoundation/hardhat-ignition/modules");
-
-// module.exports = buildModule("RealEstateModule", (m) => {
-//   // Deploy NFT first
-//   const propertyNFT = m.contract("RealEstateNFT");
-
-//   // Deploy RealEstate and pass the NFT address if needed
-//   const realEstate = m.contract("RealEstate", [], {
-//     afterDeploy: async (ctx) => {
-//       // Transfer NFT ownership to RealEstate contract so it can mint
-//       await propertyNFT.transferOwnership(realEstate.address);
-//       console.log("NFT ownership transferred to RealEstate:", realEstate.address);
-//     },
-//   });
-
-//   return { propertyNFT, realEstate };
-// });
-
-
-
-// // const {buildModule} = require("@nomicfoundation/hardhat-ignition/modules");
-
-// // module.exports = buildModule("RealEstate", (m) => {
-
-// //   const realEstate = m.contract("RealEstate");
-// //   return { realEstate,  };
-// // });
 

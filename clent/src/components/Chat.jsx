@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef, useMemo } from "react";
-import useChat from "../hooks/useChat"; 
+import useChat from "../hooks/useChat";
 
 export default function Chat({
   receiverId,
@@ -7,7 +7,7 @@ export default function Chat({
   receiverFullName,
   chatMessages = [],
   onNewMessage,
-  userObjectId, 
+  userObjectId,
 }) {
   const {
     socket,
@@ -22,7 +22,7 @@ export default function Chat({
   const [typing, setTyping] = useState(false);
   const messagesEndRef = useRef(null);
 
-  
+
   const room = useMemo(() => {
     if (!userObjectId || !receiverId) return null;
     return [String(userObjectId), String(receiverId)].sort().join("_");
@@ -79,16 +79,33 @@ export default function Chat({
 
     clearTimeout(window.__typingTimeout);
     window.__typingTimeout = setTimeout(() => typingApi.stopTyping(room), 1000);
+
+//     const typingTimeoutRef = useRef();
+// clearTimeout(typingTimeoutRef.current);
+// typingTimeoutRef.current = setTimeout(() => typingApi.stopTyping(room), 1000);
+
   };
 
   // Send message
   const handleSend = () => {
     if (!message.trim() || !socket || !connected || !room) return;
 
-    
+
     sendMsg(receiverId, message);
 
-    setMessages((prev) => [
+    // setMessages((prev) => [
+    //   ...prev,
+    //   {
+    //     _id: `tmp_${Date.now()}`,
+    //     sender: { _id: userObjectId, fullName: currentUserFullName },
+    //     receiver: { _id: receiverId, fullName: receiverFullName },
+    //     message,
+    //     room,
+    //     createdAt: new Date().toISOString(),
+    //   },
+    // ]);
+
+setMessages((prev) => [
   ...prev,
   {
     _id: `tmp_${Date.now()}`,
@@ -100,6 +117,9 @@ export default function Chat({
   },
 ]);
 
+// useEffect(() => {
+//   setMessages([...hookMessages]); // sync socket messages
+// }, [hookMessages]);
 
     console.log(" Message sent:", message);
 
@@ -125,6 +145,10 @@ export default function Chat({
       <div className="flex-1 overflow-y-auto p-4 space-y-2 bg-gray-100">
         {messages.map((msg, idx) => {
           const isSender = String(msg.sender?._id) === String(userObjectId);
+          // const isSender =
+          //   String(msg.sender?.walletAddress).toLowerCase() ===
+          //   String(userObjectId).toLowerCase();
+
 
           return (
             <div
@@ -132,11 +156,10 @@ export default function Chat({
               className={`flex ${isSender ? "justify-end" : "justify-start"}`}
             >
               <div
-                className={`relative max-w-[70%] p-3 rounded-2xl break-words ${
-                  isSender
+                className={`relative max-w-[70%] p-3 rounded-2xl break-words ${isSender
                     ? "bg-green-500 text-white rounded-br-none"
                     : "bg-white text-gray-900 rounded-bl-none"
-                } shadow-sm`}
+                  } shadow-sm`}
               >
                 {!isSender && (
                   <p className="text-[11px] mb-1 opacity-80">
@@ -187,3 +210,12 @@ export default function Chat({
     </div>
   );
 }
+
+
+
+
+
+
+
+
+

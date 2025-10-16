@@ -1,81 +1,58 @@
-import { createAppKit } from '@reown/appkit/react';
-import { EthersAdapter } from '@reown/appkit-adapter-ethers';
+import { createAppKit } from '@reown/appkit/react'
+import { EthersAdapter } from '@reown/appkit-adapter-ethers'
+import { defineChain, celo } from '@reown/appkit/networks'
 
-
-const projectId = import.meta.env.VITE_APPKIT_PROJECT_ID;
-
-
-const alfajores = {
-  id: 44787,
-  name: 'Celo Alfajores',
-  network: 'celo-alfajores',
+// ✅ 1. Define Celo Sepolia network
+export const celoSepolia = defineChain({
+  id: 11142220,
+  caipNetworkId: 'eip155:11142220', 
+  chainNamespace: 'eip155',
+  name: 'Celo Sepolia',
   nativeCurrency: {
-    name: 'CELO',
+    name: 'Celo',
     symbol: 'CELO',
     decimals: 18,
   },
   rpcUrls: {
     default: {
-      http: ['https://alfajores-forno.celo-testnet.org'],
+      http: ['https://rpc.ankr.com/celo_sepolia'],
     },
   },
   blockExplorers: {
     default: {
-      name: 'CeloScan',
-      url: 'https://alfajores.celoscan.io',
+      name: 'Blockscout',
+      url: 'https://celo-sepolia.blockscout.com', 
     },
   },
   testnet: true,
-};
+})
 
-const celo = {
-  id: 42220,
-  name: 'Celo Mainnet',
-  network: 'celo-mainnet',
-  nativeCurrency: {
-    name: 'CELO',
-    symbol: 'CELO',
-    decimals: 18,
-  },
-  rpcUrls: {
-    default: {
-      http: ['https://forno.celo.org'],
-    },
-  },
-  blockExplorers: {
-    default: {
-      name: 'CeloScan',
-      url: 'https://celoscan.io',
-    },
-  },
-  testnet: false,
-};
+// ✅ 2. Get Project ID (WalletConnect / AppKit)
+const projectId = import.meta.env.VITE_APPKIT_PROJECT_ID
 
+// ✅ 3. Choose which networks to support
+const networks = [celoSepolia, celo] // Include mainnet + testnet
 
-const networks = [alfajores, celo];
-
+// ✅ 4. Optional metadata
 const metadata = {
-  name: 'My Healthcare DApp',
-  description: 'Healthcare Record System on CELO',
-  url: 'http://localhost:5173', 
-  icons: ['https://myhealthcareapp.com/icon.png'] ,
+  name: 'My DApp',
+  description: 'A decentralized healthcare app on Celo',
+  url: 'https://mydapp.example.com',
+  icons: ['https://mydapp.example.com/icon.png'],
+}
 
-
-};
-
-
+// ✅ 5. Initialize AppKit
 createAppKit({
   adapters: [new EthersAdapter()],
   networks,
   metadata,
   projectId,
-  features: {
-    analytics: true 
-  },
   themeVariables: {
-    "--w3m-accent": "#00bcd4",
-    "--w3m-border-radius-master": "12px",
+    '--w3m-accent': '#35D07F',
+    '--w3m-border-radius-master': '12px',
   },
-  
-});
-
+  themeMode: 'dark',
+  features: {
+    analytics: true,
+  },
+})

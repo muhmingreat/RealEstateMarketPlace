@@ -1,24 +1,26 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Indentifier:  UNLICENSED
+
 pragma solidity ^0.8.24;
 
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
-import "@chainlink/contracts/src/v0.8/interfaces/AggregatorV3Interface.sol";
+// import "@chainlink/contracts/src/v0.8/interfaces/AggregatorV3Interface.sol";
 import "./IKYCVerifier.sol";
 import "./RealEstateNft.sol";
+// import "@chainlink/contracts/src/v0.8/ChainlinkClient.sol";
 
 contract RealEstate is ReentrancyGuard {
     address public admin;
-    AggregatorV3Interface internal pricefeed;
+    // AggregatorV3Interface internal pricefeed;
     IKYCVerifier public kycVerifier;
     RealEstateNFT public propertyNFT;
 
     constructor() {
-        admin = msg.sender;
-        pricefeed = AggregatorV3Interface(
-            address(0x022F9dCC73C5Fb43F2b4eF2EF9ad3eDD1D853946)
-        );
+        // admin = msg.sender;
+        // pricefeed = AggregatorV3Interface(
+        //     address(0x022F9dCC73C5Fb43F2b4eF2EF9ad3eDD1D853946)
+        // );
         kycVerifier = IKYCVerifier(
-            address(0x73be0078b59FFfE2CE9f0007496258D11eE746De)
+            address(0xc2EA976aB13727Ab84E4f77477ad9149115Fa580)
         );
         
         propertyNFT = new RealEstateNFT();
@@ -40,6 +42,11 @@ contract RealEstate is ReentrancyGuard {
         address[] reviewers;
         string[] reviews;
         bool sold;
+        string metadataURI;
+        uint256 soldAt;
+        bool deleted;
+        // bool isActive;
+
     }
 
     struct Escrow {
@@ -76,14 +83,18 @@ contract RealEstate is ReentrancyGuard {
     uint256 public reviewsCounter;
 
     // ===== Escrow timing =====
-    uint256 public constant MIN_ESCROW_DURATION = 5 minutes;
-    uint256 public constant MAX_ESCROW_DURATION = 7 days;
+    uint256 public constant MIN_ESCROW_DURATION = 10 minutes;
+    uint256 public constant MAX_ESCROW_DURATION = 15 minutes;
+    uint256 public constant RETENTION_PERIOD = 2 hours;
 
     // ===== events =====
     event PropertyListed(
         uint256 indexed id,
         address indexed owner,
-        uint256 price
+         string title,
+        string propertyAddress,
+        uint256 price 
+       
     );
     event PaymentDeposited(
         uint256 indexed id,
@@ -94,6 +105,8 @@ contract RealEstate is ReentrancyGuard {
     event PropertySold(
         uint256 indexed id,
         address indexed oldOwner,
+        string title,
+        string propertyAddress,
         address indexed newOwner,
         uint256 price
     );
@@ -110,7 +123,7 @@ contract RealEstate is ReentrancyGuard {
         uint256 likes
     );
     event DisputeResolved(uint256 indexed id, address recipient, bool refunded);
-
+    event PropertyDeleted(uint256 indexed propertyId);
     event NFTMinted(
         uint256 indexed nftId,
         address indexed owner,
@@ -126,38 +139,66 @@ contract RealEstate is ReentrancyGuard {
         require(msg.sender == admin, "Only admin");
         _;
     }
+  function cleanupSoldProperty(uint256 propertyId) external validProperty(propertyId) {
+        Property storage property = properties[propertyId];
+        require(property.sold, "Property not sold");
+        require(block.timestamp > property.soldAt + RETENTION_PERIOD, "Too early to cleanup");
+        require(escrows[propertyId].amount == 0, "Active escrow exists");
+
+        // burn NFT if contract holds it
+        if (property.nftId != 0 && propertyNFT.ownerOf(property.nftId) == address(this)) {
+            propertyNFT.burn(property.nftId);
+        }
+
+        property.deleted = true;
+
+        delete property.images;
+        delete property.reviewers;
+        delete property.reviews;
+        property.metadataURI = "";
+        property.owner = payable(address(0));
+        property.price = 0;
+        property.propertyTitle = "";
+        property.category = "";
+        property.propertyAddress = "";
+        property.description = "";
+        property.nftId = 0;
+
+        delete escrows[propertyId];
+        delete products[propertyId];
+        delete reviews[propertyId];
+
+        emit PropertyDeleted(propertyId);
+    }
+ 
+
+  
 
     // ===== Chainlink ETH price =====
-    function getLatestEthPrice() public view returns (uint256 price) {
-        (, int256 answer, , uint256 updatedAt, ) = pricefeed.latestRoundData();
-        uint8 decimals = pricefeed.decimals();
+    // function getLatestEthPrice() public view returns (uint256 price) {
+    //     (, int256 answer, , uint256 updatedAt, ) = pricefeed.latestRoundData();
+    //     uint8 decimals = pricefeed.decimals();
 
-        require(answer > 0, "Invalid ETH price from oracle");
-        require(block.timestamp - updatedAt <= 1 hours, "Stale oracle price");
+    //     require(answer > 0, "Invalid ETH price from oracle");
+    //     require(block.timestamp - updatedAt <= 1 hours, "Stale oracle price");
 
-        if (decimals < 18) {
-            price = uint256(answer) * (10 ** (18 - decimals));
-        } else if (decimals > 18) {
-            price = uint256(answer) / (10 ** (decimals - 18));
-        } else {
-            price = uint256(answer);
-        }
-    }
+    //     if (decimals < 18) {
+    //         price = uint256(answer) * (10 ** (18 - decimals));
+    //     } else if (decimals > 18) {
+    //         price = uint256(answer) / (10 ** (decimals - 18));
+    //     } else {
+    //         price = uint256(answer);
+    //     }
+    // }
+
+   
 
     function getRequiredEth(uint256 propertyId) public view returns (uint256) {
-        Property memory prop = properties[propertyId];
-        require(!prop.sold, "Already sold");
+    Property memory prop = properties[propertyId];
+    require(!prop.sold, "Already sold");
+    return prop.price; // already in wei
+}
 
-        uint256 ethPrice = getLatestEthPrice();
-        require(ethPrice > 0, "ETH price is zero");
-
-        uint256 requiredEth = (prop.price * 1e18) / ethPrice;
-        if ((prop.price * 1e18) % ethPrice != 0) requiredEth += 1;
-
-        return requiredEth;
-    }
-
-    
     function listProperty(
         address payable owner,
         uint256 price,
@@ -165,7 +206,8 @@ contract RealEstate is ReentrancyGuard {
         string memory _category,
         string[] memory _images,
         string memory _propertyAddress,
-        string memory _description
+        string memory _description,
+        string memory _metadataURI 
     ) external returns (uint256) {
         require(price > 0, "Price must be > 0");
         require(msg.sender == owner, "Caller must be owner");
@@ -180,14 +222,20 @@ contract RealEstate is ReentrancyGuard {
         property.category = _category;
         property.propertyAddress = _propertyAddress;
         property.description = _description;
+        property.metadataURI = _metadataURI;
+        property.soldAt = 0;
+        property.deleted = false;
+        // property.isActive = true;
+
         for (uint i = 0; i < _images.length; i++) {
             property.images.push(_images[i]);
         }
 
-        uint256 nftId = propertyNFT.mintProperty(address(this), _images[0]);
+        uint256 nftId = propertyNFT.mintProperty(address(this),  _metadataURI);
         property.nftId = nftId;
+     
 
-        emit PropertyListed(productId, owner, price);
+        emit PropertyListed(productId, owner, _propertyTitle, _propertyAddress, price);
         emit NFTMinted(nftId, address(this), productId);
         return productId;
     }
@@ -254,7 +302,8 @@ contract RealEstate is ReentrancyGuard {
 
         address oldOwner = property.owner;
         property.owner = payable(escrow.buyer);
-        emit PropertySold(id, oldOwner, property.owner, property.price);
+        emit PropertySold(id, oldOwner, property.propertyTitle, 
+         property.propertyAddress, property.owner, property.price);
     }
 
     function claimExpiredEscrow(uint256 id) external nonReentrant validProperty(id) {
@@ -310,7 +359,9 @@ contract RealEstate is ReentrancyGuard {
                 property.nftId
             );
 
-            emit PropertySold(id, oldOwner, property.owner, property.price);
+                 emit PropertySold(id, oldOwner, property.propertyTitle, 
+         property.propertyAddress, property.owner, property.price);
+            // emit PropertySold(id, oldOwner, property.owner, property.price);
         }
 
         emit DisputeResolved(id, recipient, refundBuyer);
@@ -471,5 +522,36 @@ contract RealEstate is ReentrancyGuard {
         }
         return highestRatedProductId;
     }
+
+
+
+function deleteProperty(uint256 propertyId) external validProperty(propertyId) {
+    Property storage property = properties[propertyId];
+
+    // Allow original owner, new buyer (current owner), or admin
+    require(msg.sender == property.owner || msg.sender == admin, "Not authorized");
+    // Prevent deletion if escrow is active
+    require(escrows[propertyId].amount == 0, "Active escrow exists");
+  
+  if (property.nftId != 0 && propertyNFT.ownerOf(property.nftId) == address(this)) {
+        propertyNFT.burn(property.nftId);
+    }
+
+    // Shift properties down for hard deletion
+    for (uint256 i = propertyId; i < propertyIndex - 1; i++) {
+        properties[i] = properties[i + 1];
+    }
+    delete properties[propertyIndex - 1];
+    propertyIndex--;
+
+    // Clean up mappings
+    delete escrows[propertyId];
+    delete products[propertyId];
+    delete reviews[propertyId];
+
+    emit PropertyDeleted(propertyId);
+}
+
+
 }
 

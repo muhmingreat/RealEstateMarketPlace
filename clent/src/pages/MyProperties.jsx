@@ -1,35 +1,25 @@
 import React, { useEffect, useState } from "react";
 import { useAppKitAccount } from "@reown/appkit/react";
 import { useGetUserProperties } from "../hooks/useBlockchain";
+import { useCeloToUSD } from "../utils/uploadToIPFS"
 import { ethers } from "ethers";
 
 const MyProperties = () => {
-  const { address, isConnected } = useAppKitAccount(); // Get connected wallet
+  const { address, isConnected } = useAppKitAccount();
   const getUserProperties = useGetUserProperties();
+  
   const [properties, setProperties] = useState([]);
-
+const { convertCeloToUSD, celoPrice, loading, error } = useCeloToUSD();
   useEffect(() => {
     const fetchData = async () => {
       if (!isConnected || !address) return;
       try {
         const result = await getUserProperties(address);
-        // Format result if needed (assuming result is array of structs)
-        const formatted = result.map((prop) => ({
-          id: prop.id,
-          title: prop.title,
-          category: prop.category,
-          price: ethers.formatEther(prop.price),
-          description: prop.description,
-          address: prop.location,
-          images: prop.images || [],
-          sold: prop.sold,
-        }));
-        setProperties(formatted);
+        setProperties(result);
       } catch (err) {
         console.error("Error fetching user properties:", err);
       }
     };
-
     fetchData();
   }, [isConnected, address, getUserProperties]);
 
@@ -38,36 +28,70 @@ const MyProperties = () => {
   }
 
   return (
-    // <div className="p-6">
- <div className="min-h-screen p-6 bg-[radial-gradient(circle,rgba(0,0,0,0.1)_1px,transparent_2000px)] bg-[length:2000px_2000px]">
-      <h2 className="text-2xl font-bold mb-4 text-center">My Properties</h2>
+    <div className="min-h-screen bg-gradient-to-br from-blue-950 p-6 via-blue-100 to-white/60">
+      <h2 className="text-2xl font-bold mb-4 mt-6 text-gray-700 text-center">
+        My Properties
+      </h2>
+
       {properties.length === 0 ? (
         <p className="text-center text-gray-500">No properties found.</p>
       ) : (
         <div className="grid lg:grid-cols-3 md:grid-cols-2 sm:grid-cols-1 gap-6">
-          {properties.map((property) => (
-            <div
-              key={property.id}
-              className=" p-4 shadow hover:shadow-lg transition"
-            >
-              {property.images.length > 0 && (
-                <img
-                  src={property.images[0]}
-                  alt={property.title}
-                  className="w-full h-48 object-cover rounded-lg mb-3"
-                />
-              )}
-              <h3 className="text-lg font-semibold">{property.title}</h3>
-              <p><strong>Category:</strong> {property.category}</p>
-              <p><strong>Price:</strong> {property.price} ETH</p>
-              <p><strong>Address:</strong> {property.address}</p>
-              <p className="text-sm text-gray-600">{property.description}</p>
-              <p className="mt-2">
-                <strong>Status:</strong>{" "}
-                {property.sold ? "Sold" : "Available"}
-              </p>
-            </div>
-          ))}
+          {properties.map((property) => {
+          
+            const celoValue = property.price ? parseFloat(property.price) : 0;
+
+            const usdValue = celoValue
+              ? convertCeloToUSD(celoValue)
+              : null;
+          
+            return (
+              <div
+                key={property.productID}
+                className="p-4 shadow hover:shadow-lg transition"
+              >
+                {property.images.length > 0 && (
+                  <img
+                    src={property.images[0]}
+                    alt={property.title}
+                    className="w-full h-48 object-cover rounded-lg mb-3"
+                  />
+                )}
+
+                <h3 className="text-lg font-semibold"> Title {property.title}</h3>
+                <p>
+                  <strong>Category </strong> {property.category}
+                </p>
+
+                <div className="flex align-center space-x-4">
+                  <p>
+                    <strong>Price:</strong> {celoValue} Celo
+                  </p>
+                    {usdValue && (
+                    <p className="font-medium text-blue-600">
+                      ${usdValue}
+                    </p>
+                  )}
+                 
+                </div>
+
+                <p>
+                  <strong>Location:</strong> {property.location}
+                </p>
+                <p className="text-sm text-gray-600">
+                  <strong className="text-black"> Description</strong> { property.description}</p>
+
+                <p className="mt-2">
+                  <strong>Status:</strong>{" "}
+                  {property.sold ? (
+                    <span className="text-red-500">Sold</span>
+                  ) : (
+                    <span className="text-green-700 font-bold">Available</span>
+                  )}
+                </p>
+              </div>
+            );
+          })}
         </div>
       )}
     </div>
@@ -75,3 +99,5 @@ const MyProperties = () => {
 };
 
 export default MyProperties;
+
+

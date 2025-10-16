@@ -1,14 +1,12 @@
-
-
-
-
 import { useCallback, useEffect, useState } from "react";
 import useContractInstance from "./useContractInstance";
 import { useAppKitAccount, useAppKitNetwork } from "@reown/appkit/react";
 import { toast } from "react-toastify";
-import { celoAlfajores } from "@reown/appkit/networks";
+// import { celoAlfajores } from "@reown/appkit/networks"
+import { celoSepolia, } from "../config/sepolia";;
 import { ErrorDecoder } from "ethers-decode-error";
 import { useDispatch } from "react-redux";
+import { ethers, formatEther } from "ethers";
 import {
   setProperties,
   setMyProperties,
@@ -22,36 +20,90 @@ import {
   likeReview,
   setLoading,
   setError,
-} from "../redux/slices/realEstateSlice";
+  deleteProperty,
+  setSelectedProperty,
 
+} from "../redux/slices/realEstateSlice";
+import { escrowStart, escrowSuccess, escrowFail, escrowReset } from "../redux/slices/escrowSlice";
 /** ---------------------------
  *  READ HOOKS WITH REDUX
  *  ---------------------------
  */
 
-export function useGetLatestEthPrice() {
-  const [ethPrice, setEthPrice] = useState(null);
-  const contract = useContractInstance("realEstate", false);
 
-  useEffect(() => {
-    const fetchPrice = async () => {
-      if (!contract) return;
+
+export const useGetProperty = () => {
+  const contract = useContractInstance(false);
+  const dispatch = useDispatch();
+
+  return useCallback(
+    async (id) => {
+      if (!contract) return null;
+      dispatch(setLoading(true));
       try {
-        const price = await contract.getLatestEthPrice();
-        const formatted = Number(price) / 1e18;
-        setEthPrice(formatted.toFixed(2));
-      } catch (err) {
-        console.error("Error fetching ETH price:", err);
-      }
-    };
-    fetchPrice();
-  }, [contract]);
+        const basic = await contract.getPropertyBasic(id);
+        const extended = await contract.getPropertyExtended(id);
+        const escrow = await contract.escrows(id);
 
-  return { ethPrice };
-}
+        const [
+          productID,
+          owner,
+          price,
+          propertyTitle,
+          category,
+          images,
+        ] = basic;
+
+        const [
+          propertyAddress,
+          description,
+          sold,
+          verified,
+          verifiedAt,
+          verifiedDocHash,
+        ] = extended;
+
+        const [buyer, amount, confirmed, refunded] = escrow;
+
+        const property = {
+          productID: productID.toString(),
+          owner,
+          price: price.toString(),
+          propertyTitle,
+          category,
+          images,
+          propertyAddress,
+          description,
+          sold,
+          verified,
+          verifiedAt: verifiedAt.toString(),
+          verifiedDocHash,
+          escrow: {
+            buyer,
+            amount: amount.toString(),
+            confirmed,
+            refunded,
+          },
+        };
+
+        dispatch(setSelectedProperty(property));
+        return property; // ✅ always return data
+      } catch (err) {
+        console.error("Failed to fetch property:", err);
+        dispatch(setError("Failed to fetch property"));
+        toast.error("Failed to fetch property");
+        return null;
+      } finally {
+        dispatch(setLoading(false));
+      }
+    },
+    [contract, dispatch]
+  );
+};
+
 
 export const useGetAllProperties = () => {
-  const contract = useContractInstance("realEstate", true);
+  const contract = useContractInstance(true);
   const dispatch = useDispatch();
 
   return useCallback(async () => {
@@ -61,17 +113,19 @@ export const useGetAllProperties = () => {
 
       const rawProps = await contract.getAllProperties();
       const properties = rawProps.map((p) => ({
-        productID: p.productID.toString(), // convert BigInt -> string
+        productID: p.productID.toString(),
         owner: p.owner,
         title: p.title,
         category: p.category,
-        price: p.price.toString(),         // convert BigInt -> string
+        price: p.price.toString(),
         location: p.propertyAddress,
         description: p.description,
         images: p.images,
         sold: p.sold || false,
       }));
-
+      const validProps = rawProps.filter(p => p && p.title);
+      console.log("Valid properties after filtering:", validProps);
+      console.log("Fetched properties:", properties);
       dispatch(setProperties(properties));
       return properties;
     } catch (error) {
@@ -86,19 +140,29 @@ export const useGetAllProperties = () => {
 };
 
 export const useGetUserProperties = () => {
-  const contract = useContractInstance("realEstate", true);
+  const contract = useContractInstance(true);
   const dispatch = useDispatch();
 
   return useCallback(
     async (userAddress) => {
+      if (!contract) return [];
+
       dispatch(setLoading(true));
       try {
         const userPropsRaw = await contract.getUserProperties(userAddress);
+
+        // ✅ Format everything here
         const userProps = userPropsRaw.map((p) => ({
-          ...p,
-          productID: p.productID.toString(),
-          price: p.price.toString(),
+          productID: Number(p.productID),
+          title: p.propertyTitle,
+          category: p.category,
+          price: p.price ? ethers.formatEther(p.price) : "0",
+          description: p.description,
+          location: p.propertyAddress,
+          images: p.images ? p.images.map((img) => String(img)) : [],
+          sold: Boolean(p.sold),
         }));
+
         dispatch(setMyProperties(userProps));
         return userProps;
       } catch (error) {
@@ -113,16 +177,30 @@ export const useGetUserProperties = () => {
   );
 };
 
+
+
+
 export const useGetProductReview = () => {
-  const contract = useContractInstance("realEstate", true);
+  const contract = useContractInstance(false);
   const dispatch = useDispatch();
 
   return useCallback(
     async (productId) => {
       try {
+        if (!contract) return [];
+
         const reviews = await contract.getProductReview(productId);
-        dispatch(setReviews({ productID: productId.toString(), reviews }));
-        return reviews;
+
+        const normalized = reviews.map(r => ({
+          reviewer: r.reviewer,
+          productId: r.productId?.toString(),
+          rating: Number(r.rating),
+          comment: r.comment,
+          likes: Number(r.likes)
+        }));
+
+        dispatch(setReviews({ productID: productId.toString(), reviews: normalized }));
+        return normalized;
       } catch (error) {
         console.error(error);
         toast.error("Failed to fetch product reviews");
@@ -134,14 +212,22 @@ export const useGetProductReview = () => {
 };
 
 export const useGetUserReviews = () => {
-  const contract = useContractInstance("realEstate", true);
+  const contract = useContractInstance(false);
   const dispatch = useDispatch();
 
   return useCallback(
     async (userAddress) => {
       try {
+
         const reviews = await contract.getUserReviews(userAddress);
-        dispatch(setUserReviews(reviews));
+        const normalized = reviews.map(r => ({
+          ...r,
+          rating: r.rating?.toString(),
+          user: r.user,
+          comment: r.comment,
+        }));
+        dispatch(setUserReviews(normalized));
+
         return reviews;
       } catch (error) {
         console.error(error);
@@ -153,19 +239,24 @@ export const useGetUserReviews = () => {
   );
 };
 
+
 export const useGetHighestRatedProduct = () => {
-  const contract = useContractInstance("realEstate", true);
+  const contract = useContractInstance(false);
   const dispatch = useDispatch();
 
   return useCallback(async () => {
     try {
-      const product = await contract.getHighestRatedProduct();
-      if (product?.productID) {
-        product.productID = product.productID.toString(); // convert BigInt
-        product.price = product.price.toString();
+      let productId = await contract.getHighestRatedProduct();
+
+
+      if (typeof productId === "bigint") {
+        productId = productId.toString();
       }
-      dispatch(setHighestRated(product || null));
-      return product || null;
+
+
+      dispatch(setHighestRated(productId));
+
+      return productId;
     } catch (error) {
       console.error(error);
       toast.error("Failed to fetch highest rated product");
@@ -174,10 +265,6 @@ export const useGetHighestRatedProduct = () => {
   }, [contract, dispatch]);
 };
 
-/** ---------------------------
- *  WRITE HOOKS WITH REDUX
- *  ---------------------------
- */
 
 const useValidation = (contract, address, chainId) => {
   if (!address) {
@@ -188,105 +275,72 @@ const useValidation = (contract, address, chainId) => {
     toast.error("Contract not found");
     return false;
   }
-  if (Number(chainId) !== Number(celoAlfajores.id)) {
-    toast.error("You're not connected to Celo Alfajores");
+  if (Number(chainId) !== Number(celoSepolia.id)) {
+    toast.error("You're not connected to Celo Sepolia");
     return false;
   }
   return true;
 };
 
-// List Property
-export const useListProperty = () => {
-  const contract = useContractInstance("realEstate", true);
-  const { address } = useAppKitAccount();
-  const { chainId } = useAppKitNetwork();
-  const dispatch = useDispatch();
 
-  return useCallback(
-    async (owner, price, title, category, images, propertyAddress, description) => {
-      if (!useValidation(contract, address, chainId)) return false;
-
-      dispatch(setLoading(true));
-      try {
-        const estimatedGas = await contract.listProperty.estimateGas(
-          owner, price, title, category, images, propertyAddress, description
-        );
-
-        const tx = await contract.listProperty(
-          owner, price, title, category, images, propertyAddress, description,
-          { gasLimit: (estimatedGas * BigInt(120)) / BigInt(100) }
-        );
-
-        const receipt = await tx.wait();
-        if (receipt.status === 1) {
-          toast.success("Property listed successfully");
-          const newProperty = {
-            productID: Date.now().toString(), // generate serializable ID
-            owner,
-            title,
-            category,
-            price: price.toString(),
-            location: propertyAddress,
-            description,
-            images,
-            sold: false,
-          };
-          dispatch(addProperty(newProperty));
-          return true;
-        }
-        toast.error("Transaction failed");
-        return false;
-      } catch (error) {
-        console.error(error);
-        toast.error(error.reason || error.message || "Transaction failed");
-        return false;
-      } finally {
-        dispatch(setLoading(false));
-      }
-    },
-    [contract, address, chainId, dispatch]
-  );
-};
-
-// Update Property
 export const useUpdateProperty = () => {
-  const contract = useContractInstance("realEstate", true);
+  const contract = useContractInstance( true);
   const { address } = useAppKitAccount();
   const { chainId } = useAppKitNetwork();
   const dispatch = useDispatch();
 
   return useCallback(
-    async (owner, productId, images, propertyAddress, title, category, description) => {
+    async (productId, title, category, images, propertyAddress, description) => {
       if (!useValidation(contract, address, chainId)) return false;
 
       dispatch(setLoading(true));
       try {
+        const formattedImages = Array.isArray(images) ? images : [images];
+        const formattedAddress = Array.isArray(propertyAddress)
+          ? propertyAddress[0]
+          : propertyAddress;
+
         const estimatedGas = await contract.updateProperty.estimateGas(
-          owner, productId, images, propertyAddress, title, category, description
+          address,
+          productId,
+          formattedImages,
+          formattedAddress,
+          title,
+          category,
+          description
         );
 
         const tx = await contract.updateProperty(
-          owner, productId, images, propertyAddress, title, category, description,
+          address,
+          productId,
+          formattedImages,
+          formattedAddress,
+          title,
+          category,
+          description,
           { gasLimit: (estimatedGas * BigInt(120)) / BigInt(100) }
         );
 
         const receipt = await tx.wait();
         if (receipt.status === 1) {
-          toast.success("Property updated");
-          dispatch(updateProperty({
-            productID: productId.toString(),
-            images,
-            propertyAddress,
-            title,
-            category,
-            description,
-          }));
+          toast.success("Property updated successfully");
+          dispatch(
+            updateProperty({
+              owner: address,
+              productID: productId.toString(),
+              propertyTitle: title,
+              category,
+              images: formattedImages,
+              propertyAddress: formattedAddress,
+              description,
+            })
+          );
           return true;
         }
         toast.error("Failed to update property");
         return false;
       } catch (error) {
-        console.error(error);
+        console.error("UpdateProperty error:", error);
         toast.error(error.reason || error.message || "Transaction failed");
         return false;
       } finally {
@@ -297,9 +351,10 @@ export const useUpdateProperty = () => {
   );
 };
 
+
 // Update Price
 export const useUpdatePrice = () => {
-  const contract = useContractInstance("realEstate", true);
+  const contract = useContractInstance(true);
   const { address } = useAppKitAccount();
   const { chainId } = useAppKitNetwork();
   const dispatch = useDispatch();
@@ -335,47 +390,77 @@ export const useUpdatePrice = () => {
   );
 };
 
-// Deposit Payment
+
+
 export function useDepositPayment() {
-  const contract = useContractInstance("realEstate", true);
-  const dispatch = useDispatch();
+  const contract = useContractInstance(true);
+  const { address, provider } = useAppKitAccount();
 
   return useCallback(
-    async (propertyId, duration, requiredEth) => {
-      dispatch(setLoading(true));
+    async (propertyId, duration, requiredWei) => {
+      if (!contract) throw new Error("Contract not initialized");
+      if (!address) throw new Error("Wallet not connected");
+
+      // Normalize requiredWei to BigInt
+      let valueToSend;
+      if (typeof requiredWei === "bigint") valueToSend = requiredWei;
+      else if (requiredWei && requiredWei._isBigNumber) valueToSend = BigInt(requiredWei.toString());
+      else if (typeof requiredWei === "string") valueToSend = ethers.parseEther(requiredWei);
+      else valueToSend = BigInt(requiredWei?.toString() || "0");
+
       try {
-        if (!contract) throw new Error("Contract not loaded");
 
-        let valueToSend;
-        if (typeof requiredEth === "string" || typeof requiredEth === "number") {
-          valueToSend = BigInt(requiredEth);
-        } else if (typeof requiredEth === "bigint") {
-          valueToSend = requiredEth;
-        } else {
-          throw new Error("Invalid requiredEth type");
-        }
 
-        const tx = await contract.depositPayment(propertyId, duration, { value: valueToSend });
-        await tx.wait();
+        const estimatedGas = await contract.depositPayment.estimateGas(propertyId, duration, { value: valueToSend });
+        // const gasLimit = (BigInt(estimatedGas) * 120n) / 100n;
 
-        toast.success("Payment deposited successfully!");
-        return true;
-      } catch (error) {
-        console.error("Deposit error:", error);
-        toast.error(`Deposit error: ${error.message || error}`);
-        dispatch(setError(error.message || "Deposit failed"));
-        return false;
-      } finally {
-        dispatch(setLoading(false));
+        const tx = await contract.depositPayment(propertyId, duration, {
+          gasLimit:
+
+
+            (estimatedGas * BigInt(120)) / BigInt(100), value: valueToSend
+        });
+
+
+
+        toast.info("Transaction sent — awaiting confirmation");
+        const receipt = await tx.wait();
+        toast.success("Deposit successful");
+        return receipt.transactionHash;
+      } catch (err) {
+        // try to get a readable reason
+        console.error("Deposit failed:", err);
+        const reason = err?.reason || err?.message || "Deposit failed";
+        toast.error(reason);
+        throw err;
       }
     },
-    [contract, dispatch]
+    [contract, address, provider]
+  );
+}
+
+
+
+
+export const useGetRequiredEth = () => {
+  const contract = useContractInstance();
+
+  return useCallback(
+    async (propertyId) => {
+      if (!contract) throw new Error("Contract not loaded");
+      // returns BigInt (ethers v6) or BigNumber depending on your setup - normalize
+      const amount = await contract.getRequiredEth(propertyId);
+      return {
+        raw: BigInt(amount.toString()),
+        formatted: ethers.formatEther(amount),
+      };
+    },
+    [contract]
   );
 };
 
-// Confirm Purchase
 export const useConfirmPurchase = () => {
-  const contract = useContractInstance("realEstate", true);
+  const contract = useContractInstance(true);
   const { address } = useAppKitAccount();
   const { chainId } = useAppKitNetwork();
   const dispatch = useDispatch();
@@ -386,7 +471,10 @@ export const useConfirmPurchase = () => {
       dispatch(setLoading(true));
       try {
         const estimatedGas = await contract.confirmPurchase.estimateGas(id);
-        const tx = await contract.confirmPurchase(id, { gasLimit: (estimatedGas * BigInt(120)) / BigInt(100) });
+        const tx = await contract.confirmPurchase(id, {
+          gasLimit:
+            (estimatedGas * BigInt(120)) / BigInt(100)
+        });
         const receipt = await tx.wait();
 
         if (receipt.status === 1) {
@@ -402,7 +490,7 @@ export const useConfirmPurchase = () => {
           const errorDecoder = ErrorDecoder.create();
           const decoded = await errorDecoder.decode(error);
           errorMsg = decoded?.reason || errorMsg;
-        } catch {}
+        } catch { }
         toast.error(errorMsg);
         dispatch(setError(errorMsg));
         return false;
@@ -416,7 +504,7 @@ export const useConfirmPurchase = () => {
 
 // Resolve Dispute
 export const useResolveDispute = () => {
-  const contract = useContractInstance("realEstate", true);
+  const contract = useContractInstance(true);
   const { address } = useAppKitAccount();
   const { chainId } = useAppKitNetwork();
   const dispatch = useDispatch();
@@ -427,7 +515,10 @@ export const useResolveDispute = () => {
       dispatch(setLoading(true));
       try {
         const estimatedGas = await contract.resolveDispute.estimateGas(id, refundBuyer);
-        const tx = await contract.resolveDispute(id, refundBuyer, { gasLimit: (estimatedGas * BigInt(120)) / BigInt(100) });
+        const tx = await contract.resolveDispute(id, refundBuyer, {
+          gasLimit:
+            (estimatedGas * BigInt(120)) / BigInt(100)
+        });
         const receipt = await tx.wait();
 
         if (receipt.status === 1) {
@@ -443,7 +534,7 @@ export const useResolveDispute = () => {
           const errorDecoder = ErrorDecoder.create();
           const decoded = await errorDecoder.decode(error);
           errorMsg = decoded?.reason || errorMsg;
-        } catch {}
+        } catch { }
         toast.error(errorMsg);
         dispatch(setError(errorMsg));
         return false;
@@ -455,25 +546,9 @@ export const useResolveDispute = () => {
   );
 };
 
-export const useGetRequiredEth = () => {
-  const contract = useContractInstance("realEstate", true);
 
-  return useCallback(
-    async (propertyId) => {
-      try {
-        const requiredEth = await contract.getRequiredEth(propertyId);
-        return requiredEth; 
-      } catch (error) {
-        console.error(error);
-        toast.error("Failed to fetch required ETH");
-        return null;
-      }
-    },
-    [contract]
-  );
-};
 export const useAddReview = () => {
-  const contract = useContractInstance("realEstate", true);
+  const contract = useContractInstance(true);
   const { address } = useAppKitAccount();
   const { chainId } = useAppKitNetwork();
   const dispatch = useDispatch();
@@ -492,7 +567,12 @@ export const useAddReview = () => {
         const receipt = await tx.wait();
         if (receipt.status === 1) {
           toast.success("Review added");
-          dispatch(addReview({ productID: productId, review: { rating, comment, user } }));
+
+          dispatch(addReview({
+            productID: productId.toString(),
+            review: { rating: rating.toString(), comment, user },
+          }));
+
           return true;
         }
         toast.error("Failed to add review");
@@ -510,7 +590,7 @@ export const useAddReview = () => {
 };
 
 export const useLikeReview = () => {
-  const contract = useContractInstance("realEstate", true);
+  const contract = useContractInstance(true);
   const { address } = useAppKitAccount();
   const { chainId } = useAppKitNetwork();
   const dispatch = useDispatch();
@@ -529,7 +609,12 @@ export const useLikeReview = () => {
         const receipt = await tx.wait();
         if (receipt.status === 1) {
           toast.success("Review liked");
-          dispatch(likeReview({ productID: productId, reviewIndex }));
+
+          dispatch(likeReview({
+            productID: productId.toString(),
+            reviewIndex: reviewIndex.toString()
+          }));
+
           return true;
         }
         toast.error("Failed to like review");
@@ -546,564 +631,84 @@ export const useLikeReview = () => {
   );
 };
 
+export const useDeleteProperty = () => {
+  const contract = useContractInstance(true);
+  const { address } = useAppKitAccount();
+  const { chainId } = useAppKitNetwork();
+  const dispatch = useDispatch();
 
-// import { useCallback, useEffect,useState } from "react";
-// import useContractInstance from "./useContractInstance";
-// import { useAppKitAccount, useAppKitNetwork } from "@reown/appkit/react";
-// import { toast } from "react-toastify";
-// import { celoAlfajores } from "@reown/appkit/networks";
-// import { ErrorDecoder } from "ethers-decode-error";
-// import { formatEther, ethers } from "ethers";
-// import { useDispatch } from "react-redux";
-// import {
-//   setProperties,
-//   setMyProperties,
-//   setHighestRated,
-//   setReviews,
-//   setUserReviews,
-//   addProperty,
-//   updateProperty,
-//   updatePrice,
-//   addReview,
-//   likeReview,
-//   setLoading,
-//   setError,
-// } from "../redux/slices/realEstateSlice";
+  return useCallback(
+    async (propertyId) => {
+      if (!useValidation(contract, address, chainId)) return false;
 
-// /** ---------------------------
-//  *  READ HOOKS WITH REDUX
-//  *  ---------------------------
-//  */
+      dispatch(setLoading(true));
+      try {
+        // Estimate gas
+        const estimatedGas = await contract.deleteProperty.estimateGas(propertyId);
 
-// export function useGetLatestEthPrice() {
-//   const [ethPrice, setEthPrice] = useState(null);
-//   const contract = useContractInstance("realEstate", false);
+        // Call deleteProperty
+        const tx = await contract.deleteProperty(propertyId, {
+          gasLimit: (estimatedGas * BigInt(120)) / BigInt(100),
+        });
 
-//   useEffect(() => {
-//     const fetchPrice = async () => {
-//       if (!contract) return;
-//       try {
-//         const price = await contract.getLatestEthPrice();
-//         const formatted = Number(price) / 1e18;
-//         setEthPrice(formatted.toFixed(2));
-//       } catch (err) {
-//         console.error("Error fetching ETH price:", err);
-//       }
-//     };
-//     fetchPrice();
-//   }, [contract]);
+        const receipt = await tx.wait();
+        if (receipt.status === 1) {
+          toast.success("Property deleted");
 
-//   return { ethPrice };
-// }
+          // Update Redux state
+          dispatch(deleteProperty(propertyId.toString()));
 
-// export const useGetAllProperties = () => {
-//   const contract = useContractInstance("realEstate", true);
-//   const dispatch = useDispatch();
+          return true;
+        }
 
-//   return useCallback(async () => {
-//     dispatch(setLoading(true));
-//     try {
-//       if (!contract) return [];
+        toast.error("Failed to delete property");
+        return false;
+      } catch (error) {
+        console.error("Delete property failed:", error);
+        toast.error(error.reason || error.message || "Transaction failed");
+        dispatch(setError(error.message));
+        return false;
+      } finally {
+        dispatch(setLoading(false));
+      }
+    },
+    [contract, address, chainId, dispatch]
+  );
+};
+export function useClaimExpiredEscrow() {
+  const contract = useContractInstance(true);
+  const dispatch = useDispatch();
 
-//       const rawProps = await contract.getAllProperties();
-//       const properties = rawProps.map((p) => ({
-//         productID: p.productID,
-//         owner: p.owner,
-//         title: p.title,
-//         category: p.category,
-//         price: p.price.toString(),
-//         location: p.propertyAddress,
-//         description: p.description,
-//         images: p.images,
-//         sold: p.sold || false,
-//       }));
+  return useCallback(
+    async (propertyId) => {
+      dispatch(setLoading(true));
+      try {
+        if (!contract) throw new Error("Contract not loaded");
 
-//       dispatch(setProperties(properties));
-//       return properties;
-//     } catch (error) {
-//       console.error(error);
-//       dispatch(setError("Failed to fetch properties"));
-//       toast.error("Failed to fetch properties");
-//       return [];
-//     } finally {
-//       dispatch(setLoading(false));
-//     }
-//   }, [contract, dispatch]);
-// };
+        // Estimate gas
+        const gasEstimate = await contract.claimExpiredEscrow.estimateGas(propertyId);
 
-// export const useGetUserProperties = () => {
-//   const contract = useContractInstance("realEstate", true);
-//   const dispatch = useDispatch();
+        // Send tx
+        const tx = await contract.claimExpiredEscrow(propertyId, {
+          gasLimit: (gasEstimate * BigInt(120)) / BigInt(100),
+        });
+        toast.loading("Claiming refund...");
 
-//   return useCallback(
-//     async (userAddress) => {
-//       dispatch(setLoading(true));
-//       try {
-//         const userProps = await contract.getUserProperties(userAddress);
-//         dispatch(setMyProperties(userProps));
-//         return userProps;
-//       } catch (error) {
-//         console.error(error);
-//         toast.error("Failed to fetch user properties");
-//         return [];
-//       } finally {
-//         dispatch(setLoading(false));
-//       }
-//     },
-//     [contract, dispatch]
-//   );
-// };
+        const receipt = await tx.wait();
+        dispatch(escrowSuccess(receipt.transactionHash));
+        toast.success("Refund claimed successfully ");
 
-// export const useGetProductReview = () => {
-//   const contract = useContractInstance("realEstate", true);
-//   const dispatch = useDispatch();
-
-//   return useCallback(
-//     async (productId) => {
-//       try {
-//         const reviews = await contract.getProductReview(productId);
-//         dispatch(setReviews({ productID: productId, reviews }));
-//         return reviews;
-//       } catch (error) {
-//         console.error(error);
-//         toast.error("Failed to fetch product reviews");
-//         return [];
-//       }
-//     },
-//     [contract, dispatch]
-//   );
-// };
-
-// export const useGetUserReviews = () => {
-//   const contract = useContractInstance("realEstate", true);
-//   const dispatch = useDispatch();
-
-//   return useCallback(
-//     async (userAddress) => {
-//       try {
-//         const reviews = await contract.getUserReviews(userAddress);
-//         dispatch(setUserReviews(reviews));
-//         return reviews;
-//       } catch (error) {
-//         console.error(error);
-//         toast.error("Failed to fetch user reviews");
-//         return [];
-//       }
-//     },
-//     [contract, dispatch]
-//   );
-// };
-
-// export const useGetHighestRatedProduct = () => {
-//   const contract = useContractInstance("realEstate", true);
-//   const dispatch = useDispatch();
-
-//   return useCallback(async () => {
-//     try {
-//       const product = await contract.getHighestRatedProduct();
-//       dispatch(setHighestRated(product));
-//       return product;
-//     } catch (error) {
-//       console.error(error);
-//       toast.error("Failed to fetch highest rated product");
-//       return null;
-//     }
-//   }, [contract, dispatch]);
-// };
-
-// /** ---------------------------
-//  *  WRITE HOOKS WITH REDUX
-//  *  ---------------------------
-//  */
-
-// const useValidation = (contract, address, chainId) => {
-//   if (!address) {
-//     toast.error("Please connect your wallet");
-//     return false;
-//   }
-//   if (!contract) {
-//     toast.error("Contract not found");
-//     return false;
-//   }
-//   if (Number(chainId) !== Number(celoAlfajores.id)) {
-//     toast.error("You're not connected to Celo Alfajores");
-//     return false;
-//   }
-//   return true;
-// };
-
-// export const useListProperty = () => {
-//   const contract = useContractInstance("realEstate", true);
-//   const { address } = useAppKitAccount();
-//   const { chainId } = useAppKitNetwork();
-//   const dispatch = useDispatch();
-
-//   return useCallback(
-//     async (owner, price, title, category, images, propertyAddress, description) => {
-//       if (!useValidation(contract, address, chainId)) return false;
-
-//       dispatch(setLoading(true));
-//       try {
-//         const estimatedGas = await contract.listProperty.estimateGas(
-//           owner,
-//           price,
-//           title,
-//           category,
-//           images,
-//           propertyAddress,
-//           description
-//         );
-
-//         const tx = await contract.listProperty(
-//           owner,
-//           price,
-//           title,
-//           category,
-//           images,
-//           propertyAddress,
-//           description,
-//           { gasLimit: (estimatedGas * BigInt(120)) / BigInt(100) }
-//         );
-
-//         const receipt = await tx.wait();
-
-//         if (receipt.status === 1) {
-//           toast.success("Property listed successfully");
-//           const newProperty = {
-//             productID: price + Date.now(),
-//             owner,
-//             title,
-//             category,
-//             price,
-//             location: propertyAddress,
-//             description,
-//             images,
-//             sold: false,
-//           };
-//           dispatch(addProperty(newProperty));
-//           return true;
-//         }
-//         toast.error("Transaction failed");
-//         return false;
-//       } catch (error) {
-//         console.error(error);
-//         toast.error(error.reason || error.message || "Transaction failed");
-//         return false;
-//       } finally {
-//         dispatch(setLoading(false));
-//       }
-//     },
-//     [contract, address, chainId, dispatch]
-//   );
-// };
-
-// export const useUpdateProperty = () => {
-//   const contract = useContractInstance("realEstate", true);
-//   const { address } = useAppKitAccount();
-//   const { chainId } = useAppKitNetwork();
-//   const dispatch = useDispatch();
-
-//   return useCallback(
-//     async (owner, productId, images, propertyAddress, title, category, description) => {
-//       if (!useValidation(contract, address, chainId)) return false;
-
-//       dispatch(setLoading(true));
-//       try {
-//         const estimatedGas = await contract.updateProperty.estimateGas(
-//           owner,
-//           productId,
-//           images,
-//           propertyAddress,
-//           title,
-//           category,
-//           description
-//         );
-
-//         const tx = await contract.updateProperty(
-//           owner,
-//           productId,
-//           images,
-//           propertyAddress,
-//           title,
-//           category,
-//           description,
-//           { gasLimit: (estimatedGas * BigInt(120)) / BigInt(100) }
-//         );
-
-//         const receipt = await tx.wait();
-//         if (receipt.status === 1) {
-//           toast.success("Property updated");
-//           dispatch(
-//             updateProperty({ productID: productId, images, propertyAddress, title, category, description })
-//           );
-//           return true;
-//         }
-//         toast.error("Failed to update property");
-//         return false;
-//       } catch (error) {
-//         console.error(error);
-//         toast.error(error.reason || error.message || "Transaction failed");
-//         return false;
-//       } finally {
-//         dispatch(setLoading(false));
-//       }
-//     },
-//     [contract, address, chainId, dispatch]
-//   );
-// };
-
-// export const useUpdatePrice = () => {
-//   const contract = useContractInstance("realEstate", true);
-//   const { address } = useAppKitAccount();
-//   const { chainId } = useAppKitNetwork();
-//   const dispatch = useDispatch();
-
-//   return useCallback(
-//     async (owner, productId, price) => {
-//       if (!useValidation(contract, address, chainId)) return false;
-
-//       dispatch(setLoading(true));
-//       try {
-//         const estimatedGas = await contract.updatePrice.estimateGas(owner, productId, price);
-//         const tx = await contract.updatePrice(owner, productId, price, {
-//           gasLimit: (estimatedGas * BigInt(120)) / BigInt(100),
-//         });
-
-//         const receipt = await tx.wait();
-//         if (receipt.status === 1) {
-//           toast.success("Price updated");
-//           dispatch(updatePrice({ productID: productId, price }));
-//           return true;
-//         }
-//         toast.error("Failed to update price");
-//         return false;
-//       } catch (error) {
-//         console.error(error);
-//         toast.error(error.reason || error.message || "Transaction failed");
-//         return false;
-//       } finally {
-//         dispatch(setLoading(false));
-//       }
-//     },
-//     [contract, address, chainId, dispatch]
-//   );
-// };
-
-// export const useAddReview = () => {
-//   const contract = useContractInstance("realEstate", true);
-//   const { address } = useAppKitAccount();
-//   const { chainId } = useAppKitNetwork();
-//   const dispatch = useDispatch();
-
-//   return useCallback(
-//     async (productId, rating, comment, user) => {
-//       if (!useValidation(contract, address, chainId)) return false;
-
-//       dispatch(setLoading(true));
-//       try {
-//         const estimatedGas = await contract.addReview.estimateGas(productId, rating, comment, user);
-//         const tx = await contract.addReview(productId, rating, comment, user, {
-//           gasLimit: (estimatedGas * BigInt(120)) / BigInt(100),
-//         });
-
-//         const receipt = await tx.wait();
-//         if (receipt.status === 1) {
-//           toast.success("Review added");
-//           dispatch(addReview({ productID: productId, review: { rating, comment, user } }));
-//           return true;
-//         }
-//         toast.error("Failed to add review");
-//         return false;
-//       } catch (error) {
-//         console.error(error);
-//         toast.error(error.reason || error.message || "Transaction failed");
-//         return false;
-//       } finally {
-//         dispatch(setLoading(false));
-//       }
-//     },
-//     [contract, address, chainId, dispatch]
-//   );
-// };
-
-// export const useLikeReview = () => {
-//   const contract = useContractInstance("realEstate", true);
-//   const { address } = useAppKitAccount();
-//   const { chainId } = useAppKitNetwork();
-//   const dispatch = useDispatch();
-
-//   return useCallback(
-//     async (productId, reviewIndex, user) => {
-//       if (!useValidation(contract, address, chainId)) return false;
-
-//       dispatch(setLoading(true));
-//       try {
-//         const estimatedGas = await contract.likeReview.estimateGas(productId, reviewIndex, user);
-//         const tx = await contract.likeReview(productId, reviewIndex, user, {
-//           gasLimit: (estimatedGas * BigInt(120)) / BigInt(100),
-//         });
-
-//         const receipt = await tx.wait();
-//         if (receipt.status === 1) {
-//           toast.success("Review liked");
-//           dispatch(likeReview({ productID: productId, reviewIndex }));
-//           return true;
-//         }
-//         toast.error("Failed to like review");
-//         return false;
-//       } catch (error) {
-//         console.error(error);
-//         toast.error(error.reason || error.message || "Transaction failed");
-//         return false;
-//       } finally {
-//         dispatch(setLoading(false));
-//       }
-//     },
-//     [contract, address, chainId, dispatch]
-//   );
-// };
-
-// export function useDepositPayment() {
-//   const contract = useContractInstance("realEstate", true);
-//   const dispatch = useDispatch();
-
-//   return useCallback(
-//     async (propertyId, duration, requiredEth) => {
-//       dispatch(setLoading(true));
-//       try {
-//         if (!contract) throw new Error("Contract not loaded");
-
-//         let valueToSend;
-//         if (typeof requiredEth === "string" || typeof requiredEth === "number") {
-//           valueToSend = BigInt(requiredEth);
-//         } else if (typeof requiredEth === "bigint") {
-//           valueToSend = requiredEth;
-//         } else {
-//           throw new Error("Invalid requiredEth type");
-//         }
-
-//         const tx = await contract.depositPayment(propertyId, duration, { value: valueToSend });
-//         await tx.wait();
-
-//         toast.success("Payment deposited successfully!");
-//         return true;
-//       } catch (error) {
-//         console.error("Deposit error:", error);
-//         toast.error(`Deposit error: ${error.message || error}`);
-//         dispatch(setError(error.message || "Deposit failed"));
-//         return false;
-//       } finally {
-//         dispatch(setLoading(false));
-//       }
-//     },
-//     [contract, dispatch]
-//   );
-// }
-
-// // -------------------
-// // Confirm purchase hook
-// // -------------------
-// export const useConfirmPurchase = () => {
-//   const contract = useContractInstance("realEstate", true);
-//   const { address } = useAppKitAccount();
-//   const { chainId } = useAppKitNetwork();
-//   const dispatch = useDispatch();
-
-//   return useCallback(
-//     async (id) => {
-//       if (!useValidation(contract, address, chainId)) return false;
-//       dispatch(setLoading(true));
-//       try {
-//         const estimatedGas = await contract.confirmPurchase.estimateGas(id);
-//         const tx = await contract.confirmPurchase(id, { gasLimit: (estimatedGas * BigInt(120)) / BigInt(100) });
-//         const receipt = await tx.wait();
-
-//         if (receipt.status === 1) {
-//           toast.success("Purchase confirmed");
-//           return true;
-//         }
-//         toast.error("Failed to confirm purchase");
-//         return false;
-//       } catch (error) {
-//         console.error(error);
-//         let errorMsg = "Transaction failed";
-//         try {
-//           const errorDecoder = ErrorDecoder.create();
-//           const decoded = await errorDecoder.decode(error);
-//           errorMsg = decoded?.reason || errorMsg;
-//         } catch {}
-//         toast.error(errorMsg);
-//         dispatch(setError(errorMsg));
-//         return false;
-//       } finally {
-//         dispatch(setLoading(false));
-//       }
-//     },
-//     [contract, address, chainId, dispatch]
-//   );
-// };
-
-// // -------------------
-// // Resolve dispute hook
-// // -------------------
-// export const useResolveDispute = () => {
-//   const contract = useContractInstance("realEstate", true);
-//   const { address } = useAppKitAccount();
-//   const { chainId } = useAppKitNetwork();
-//   const dispatch = useDispatch();
-
-//   return useCallback(
-//     async (id, refundBuyer) => {
-//       if (!useValidation(contract, address, chainId)) return false;
-//       dispatch(setLoading(true));
-//       try {
-//         const estimatedGas = await contract.resolveDispute.estimateGas(id, refundBuyer);
-//         const tx = await contract.resolveDispute(id, refundBuyer, { gasLimit: (estimatedGas * BigInt(120)) / BigInt(100) });
-//         const receipt = await tx.wait();
-
-//         if (receipt.status === 1) {
-//           toast.success("Dispute resolved");
-//           return true;
-//         }
-//         toast.error("Failed to resolve dispute");
-//         return false;
-//       } catch (error) {
-//         console.error(error);
-//         let errorMsg = "Transaction failed";
-//         try {
-//           const errorDecoder = ErrorDecoder.create();
-//           const decoded = await errorDecoder.decode(error);
-//           errorMsg = decoded?.reason || errorMsg;
-//         } catch {}
-//         toast.error(errorMsg);
-//         dispatch(setError(errorMsg));
-//         return false;
-//       } finally {
-//         dispatch(setLoading(false));
-//       }
-//     },
-//     [contract, address, chainId, dispatch]
-//   );
-// };
-
-// export const useGetRequiredEth = () => {
-//   const contract = useContractInstance("realEstate", true);
-
-//   return useCallback(
-//     async (propertyId) => {
-//       try {
-//         const requiredEth = await contract.getRequiredEth(propertyId);
-//         return requiredEth; 
-//       } catch (error) {
-//         console.error(error);
-//         toast.error("Failed to fetch required ETH");
-//         return null;
-//       }
-//     },
-//     [contract]
-//   );
-// };
-
-
-
-
+        return receipt;
+      } catch (error) {
+        console.error("Claim refund error:", error);
+        dispatch(setError(error.message));
+        toast.error(error.reason || error.message || "Failed to claim refund");
+        throw error;
+      } finally {
+        dispatch(setLoading(false));
+        setTimeout(() => dispatch(escrowReset()), 5000);
+      }
+    },
+    [contract, dispatch]
+  );
+}

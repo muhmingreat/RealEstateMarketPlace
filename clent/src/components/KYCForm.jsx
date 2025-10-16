@@ -1,9 +1,10 @@
- import LivenessCheck from './LivenessCheck'
-import React, { useState, useRef,useEffect } from "react";
+import LivenessCheck from './LivenessCheck'
+import React, { useState, useRef, useEffect } from "react";
 import { Camera } from "react-camera-pro";
 import { useAppKitAccount } from "@reown/appkit/react";
 import useKYC from "../hooks/useKycVerifier";
 import { useNavigate } from 'react-router-dom';
+import { X } from 'lucide-react'
 
 export default function KYCForm() {
   const cameraRef = useRef(null);
@@ -20,14 +21,14 @@ export default function KYCForm() {
   const [verificationResult, setVerificationResult] = useState(null);
 
 
- 
+
 
   const [livenessPassed, setLivenessPassed] = useState(false);
 
-    useEffect(() => {
+  useEffect(() => {
     const agreed = localStorage.getItem("termsAgreed");
     if (agreed !== "true") {
-      navigate("/terms"); 
+      navigate("/terms");
     }
   }, [navigate]);
 
@@ -107,13 +108,13 @@ export default function KYCForm() {
       <div className="w-full max-w-lg bg-white shadow-xl rounded-2xl p-8">
 
         {!livenessPassed ? (
-    
+
           <div className="mt-4">
             <h3 className="font-semibold text-gray-800 mb-2">Liveness Check</h3>
             <LivenessCheck onSuccess={() => setLivenessPassed(true)} />
           </div>
         ) : (
-          
+
           <>
             <h2 className="text-2xl font-bold text-center mb-6 text-gray-800">
               KYC Verification
@@ -168,7 +169,7 @@ export default function KYCForm() {
                 <option value="national_id">National ID</option>
               </select>
 
-               {/* Upload Document  */}
+
               <div>
                 <label className="block font-semibold text-gray-700 mb-1">
                   Upload ID Document
@@ -178,11 +179,32 @@ export default function KYCForm() {
                   accept="image/*,.pdf"
                   onChange={(e) => setIdDocumentFile(e.target.files[0])}
                   className="w-full"
+                  // hidden
                   required
                 />
+
+
+                {idDocumentFile && (
+                  <div className="mt-3 flex flex-col items-center">
+                    {idDocumentFile.type.startsWith("image/") ? (
+                      <img
+                        src={URL.createObjectURL(idDocumentFile)}
+                        alt="ID Document Preview"
+                        className="w-40 h-40 object-cover rounded-lg border"
+                      />
+                    ) : idDocumentFile.type === "application/pdf" ? (
+                      <embed
+                        src={URL.createObjectURL(idDocumentFile)}
+                        type="application/pdf"
+                        className="w-full h-64 border rounded-lg"
+                      />
+                    ) : null}
+                  </div>
+                )}
               </div>
 
-              {/* Selfie Capture */}
+
+
               <div>
                 <label className="block font-semibold text-gray-700 mb-1">
                   Selfie
@@ -258,33 +280,54 @@ export default function KYCForm() {
                 ✅ KYC Request Submitted! Status: {status.status || "Pending"}
               </p>
             )}
-
-            {/* Show verification results */}
             {verificationResult && (
-              <div className="mt-6 p-4 border rounded-lg bg-gray-50">
-                <h3 className="font-semibold text-gray-800 mb-2">
-                  Verification Results:
-                </h3>
-                <ul className="space-y-1 text-sm text-gray-700">
-                  <li>
-                    <strong>Extracted Name:</strong>{" "}
-                    {verificationResult.documentExtractedName || "N/A"}
-                  </li>
-                  <li>
-                    <strong>Document Verified:</strong>{" "}
-                    {verificationResult.documentVerified ? "✅ Yes" : "❌ No"}
-                  </li>
-                  <li>
-                    <strong>Face Match:</strong>{" "}
-                    {verificationResult.faceMatch ? "✅ Match" : "❌ No Match"}
-                  </li>
-                  <li>
-                    <strong>Liveness Score:</strong>{" "}
-                    {verificationResult.livenessScore || "N/A"}
-                  </li>
-                </ul>
+              <div className="fixed inset-0 bg-gray-200 bg-opacity-50
+               flex items-center justify-center z-50">
+                <div className="bg-white rounded-xl shadow-lg max-w-md w-full p-6 relative">
+                  {/* Close button */}
+                  <button
+                    onClick={() => setVerificationResult(null)}
+                    className="absolute top-3 right-3 text-gray-500 hover:text-gray-700"
+                  >
+                    <X width={12} height={12} />
+                  </button>
+
+                  <h3 className="text-lg font-semibold text-gray-800 mb-4 text-center">
+                    Verification Results
+                  </h3>
+
+                  <ul className="space-y-2 text-sm text-gray-700">
+                    <li>
+                      <strong>Extracted Name:</strong>{" "}
+                      {verificationResult.documentExtractedName || "N/A"}
+                    </li>
+                    <li>
+                      <strong>Document Verified:</strong>{" "}
+                      {verificationResult.documentVerified ? "✅ Yes" : "❌ No"}
+                    </li>
+                    <li>
+                      <strong>Face Match:</strong>{" "}
+                      {verificationResult.faceMatch ? "✅ Match" : "❌ No Match"}
+                    </li>
+                    <li>
+                      <strong>Liveness Score:</strong>{" "}
+                      {verificationResult.livenessScore || "N/A"}
+                    </li>
+                  </ul>
+
+                  <div className="mt-6 flex justify-center">
+                    <button
+                      onClick={() => setVerificationResult(null)}
+                      className="px-4 py-2 bg-indigo-600 text-white 
+                      rounded-lg hover:bg-indigo-700"
+                    >
+                      Close
+                    </button>
+                  </div>
+                </div>
               </div>
             )}
+
           </>
         )}
       </div>
