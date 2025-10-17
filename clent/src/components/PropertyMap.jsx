@@ -4,6 +4,7 @@ import "leaflet/dist/leaflet.css";
 import L from "leaflet";
 import iconUrl from "leaflet/dist/images/marker-icon.png";
 import iconShadow from "leaflet/dist/images/marker-shadow.png";
+import { buildApiUrl } from "../utils/api";
 
 let DefaultIcon = L.icon({ iconUrl, shadowUrl: iconShadow });
 L.Marker.prototype.options.icon = DefaultIcon;
@@ -30,14 +31,11 @@ export default function PropertyMap({ address, title, imageUrl }) {
         const url =
   window.location.hostname === "localhost"
     ? `http://localhost:5000/api/geocode?q=${encodeURIComponent(address)}`
-    : `https://real-state-backend-liart.vercel.app/api/geocode?q=${encodeURIComponent(address)}`;
-
-const res = await fetch(url);
-
-        // const res = await fetch(
-        //   `http://localhost:5000/api/geocode?q=${encodeURIComponent(address)}` ||
-        //   `https://real-state-backend-liart.vercel.app/api/geocode?q=${encodeURIComponent(address)}`
-        // );
+    : buildApiUrl(`geocode?q=${encodeURIComponent(address)}`);
+    
+    const res = await fetch(url);
+    
+    console.log("API URL:", url, buildApiUrl(`geocode?q=${encodeURIComponent(address)}`));
         const data = await res.json();
         console.log("Fetched data:", data);
 
