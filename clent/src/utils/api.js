@@ -7,8 +7,8 @@ if (import.meta.env.MODE === "development") {
 } else {
   
   // Production (Vercel)
-  apiBaseUrl = "https://real-state-backend-delta.vercel.app"
-  // "https://realstate-backend-15lu.onrender.com"
+  apiBaseUrl = "https://realstate-backend-15lu.onrender.com/api"
+  // "https://real-state-backend-delta.vercel.app/api"
   // "https://real-state-backend-liart.vercel.app";
 }
 
