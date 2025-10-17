@@ -9,7 +9,7 @@ import { buildApiUrl } from "../utils/api";
 let DefaultIcon = L.icon({ iconUrl, shadowUrl: iconShadow });
 L.Marker.prototype.options.icon = DefaultIcon;
 
-// Component to recenter map whenever coords change
+
 function RecenterMap({ coords }) {
   const map = useMap();
   useEffect(() => {
@@ -28,14 +28,11 @@ export default function PropertyMap({ address, title, imageUrl }) {
 
     const fetchCoords = async () => {
       try {
-        const url =
-  window.location.hostname === "localhost"
-    ? `http://localhost:5000/api/geocode?q=${encodeURIComponent(address)}`
-    : buildApiUrl(`geocode?q=${encodeURIComponent(address)}`);
-    
+        const url = buildApiUrl(`geocode?q=${encodeURIComponent(address)}`);
+ 
     const res = await fetch(url);
     
-    console.log("API URL:", url, buildApiUrl(`geocode?q=${encodeURIComponent(address)}`));
+    console.log("API URL:",buildApiUrl(`geocode?q=${encodeURIComponent(address)}`));
         const data = await res.json();
         console.log("Fetched data:", data);
 
