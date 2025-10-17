@@ -4,7 +4,7 @@ pragma solidity ^0.8.24;
 import "@openzeppelin/contracts/token/ERC721/extensions/ERC721URIStorage.sol";
 import "@openzeppelin/contracts/token/ERC721/extensions/ERC721Burnable.sol";
 
-/
+ 
 contract RealEstateNFT is ERC721URIStorage, ERC721Burnable {
     uint256 public nextTokenId;
     address public minter; 
