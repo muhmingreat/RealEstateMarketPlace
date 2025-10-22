@@ -37,7 +37,7 @@ const networks = [celoSepolia, celo] // Include mainnet + testnet
 const metadata = {
   name: 'My DApp',
   description: 'A decentralized healthcare app on Celo',
-  url: 'https://mydapp.example.com',
+  url: 'https://real-estate-market-place-xi.vercel.app',
   icons: ['https://mydapp.example.com/icon.png'],
 }
 

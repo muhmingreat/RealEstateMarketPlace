@@ -11,7 +11,7 @@ export default function SearchBar() {
 
   const { searchQuery, properties } = useSelector((s) => s.realEstate);
 
-  // 🔎 Multi-field filter
+  
   const filteredProperties = useMemo(() => {
     const q = (searchQuery || "").trim().toLowerCase();
     if (!q) return [];
@@ -36,7 +36,7 @@ export default function SearchBar() {
 
   return (
     <div className="relative w-full max-w-4xl mx-auto mt-10">
-      {/* Search Input */}
+    
       <motion.div
         className="flex items-center bg-white rounded-full shadow-lg
          overflow-hidden border border-gray-200"
@@ -60,7 +60,7 @@ export default function SearchBar() {
         </button>
       </motion.div>
 
-      {/* Results */}
+    
       {searchQuery?.trim() && (
         <div className="mt-8">
           <h2 className="text-xl font-semibold mb-4 text-yellow-300">
